@@ -1,8 +1,5 @@
 <?php
 
-require 'value.php';
-require 'gpt_pack.php';
-
 class GPT_Run extends GPT_Base
 {
     // Optimizer State (Adam)

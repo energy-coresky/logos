@@ -20,8 +20,8 @@ require 'gpt_pack.php';
 #mt_srand(37);
 
 // Let there be an input dataset
-//$lines = array_map('trim', file('ihtml.txt'));
-$lines = array_map('trim', file('math.txt')); // https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt
+//$lines = array_map('trim', file('txt/ihtml.txt'));
+$lines = array_map('trim', file('txt/math.txt')); // https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt
 $docs = array_values(array_filter($lines, fn($l) => !empty($l)));
 shuffle($docs);
 echo "num docs: " . count($docs) . "\n";
