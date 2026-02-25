@@ -55,12 +55,12 @@ class GPT_Run extends GPT_Base
         file_put_contents($filename, GPT_Pack::encode($weights, $quantization));
     }
 
-    public function train(array $docs, int $n_steps, float $learning_rate = 1e-2): void
+    public function train(array $docs, int $n_steps, float $learning_rate = 1e-2): Generator
     {
         $this->init_weights();
-        $num_docs = count($docs);
-        for ($step = 0; $step < $n_steps; $step++) {
-            $doc = $docs[$step % $num_docs];
+        $n_docs = count($docs);
+        for ($step = 0; $step < $n_steps; ) {
+            $doc = $docs[$step % $n_docs];
             $tokens = [$this->BOS];
             for ($i = 0; $i < strlen($doc); $i++) {
                 $tokens[] = $this->stoi[$doc[$i]];
@@ -99,9 +99,8 @@ class GPT_Run extends GPT_Base
                 $i++;
             });
 
-            printf("\rstep %4d / %4d | loss %.4f", $step + 1, $n_steps, $loss->data);
+            yield ++$step => $loss->data;
         }
-        echo "\n";
     }
 
     public function inference(float $temperature = 0.6, int $count = 10): Generator

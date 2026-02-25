@@ -14,15 +14,15 @@ class app extends \Console
         // Let there be order among chaos
         mt_srand(37);
         $lines = array_map('trim', file(self::$d[1] . '/txt/names.txt'));
-      //$lines = array_map('trim', file('txt/math.txt'));
         $docs = array_values(array_filter($lines, fn($l) => !empty($l)));
         shuffle($docs);
         echo "num docs: " . count($docs) . "\n";
         $gpt = new GPT_Run($docs);
         echo "vocab size: $gpt->vocab_size\n";
-        $gpt->train($docs, $n_steps);
+        foreach ($gpt->train($docs, $n_steps) as $i => $loss)
+            echo "\rstep $i / $n_steps | loss $loss";
         foreach ($gpt->inference(0.6, 11) as $i => $sample)
-            echo "sample $i: " . $sample . "\n";
+            echo "\nsample $i: $sample";
     }
 
     /** Generate the dataset */
