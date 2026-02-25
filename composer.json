@@ -1,0 +1,22 @@
+{
+  "name": "coresky/logos",
+  "license": "MIT",
+  "description": "Dev-ware for Coresky framework, GPT-AI sandbox",
+  "keywords": [
+    "coresky",
+    "coresky framework",
+    "sky",
+    "gpt",
+    "karpathy",
+    "logos"
+  ],
+  "require": {
+    "php": ">=7.4.0"
+  },
+  "authors": [
+    {
+      "name": "Energy",
+      "homepage": "https://coresky.net/"
+    }
+  ]
+}

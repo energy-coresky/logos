@@ -1,0 +1,5 @@
+core:
+  plans:
+    app:
+      type: dev
+    view: {path: $SELF/mvc}
