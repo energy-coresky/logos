@@ -1,7 +1,7 @@
 <?php
 
 namespace logos;
-use Plan;
+use Plan, GPT_Run;
 
 class app extends \Console
 {
@@ -10,7 +10,24 @@ class app extends \Console
     }
 
     /** Run train & inference */
-    function a_run() {
+    function a_run($n_steps = 300) { // https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt
+        // Let there be order among chaos
+        mt_srand(37);
+        $lines = array_map('trim', file(self::$d[1] . '/txt/names.txt'));
+      //$lines = array_map('trim', file('txt/math.txt'));
+        $docs = array_values(array_filter($lines, fn($l) => !empty($l)));
+        shuffle($docs);
+        echo "num docs: " . count($docs) . "\n";
+        $gpt = new GPT_Run($docs);
+        echo "vocab size: $gpt->vocab_size\n";
+        $gpt->train($docs, $n_steps);
+        foreach ($gpt->inference(0.6, 11) as $i => $sample)
+            echo "sample $i: " . $sample . "\n";
+    }
+
+    /** Generate the dataset */
+    function a_gen() {
+/* 
         //var_export($state_dict);
         require 'param.php';
 
@@ -21,10 +38,7 @@ class app extends \Console
 
         #var_export($state_dict);
         print(11);
-    }
-
-    /** Generate the dataset */
-    function a_gen() {
+*/
         print(11);
     }
 }

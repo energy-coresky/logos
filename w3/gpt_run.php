@@ -3,14 +3,15 @@
 class GPT_Run extends GPT_Base
 {
     // Optimizer State (Adam)
-    private array $m = [];
-    private array $v = [];
+    protected array $m = [];
+    protected array $v = [];
     private float $beta1 = 0.9;
     private float $beta2 = 0.95;
     private float $eps_adam = 1e-8;
 
     public function __construct(array $docs = [])
     {
+        ini_set('memory_limit', '1G');
         $this->head_dim = intval($this->n_embd / $this->n_head);
         if (!empty($docs)) {
             $this->build_vocab($docs);
@@ -54,30 +55,7 @@ class GPT_Run extends GPT_Base
         file_put_contents($filename, GPT_Pack::encode($weights, $quantization));
     }
 
-    /**
-     * Инициализация случайных весов (Xavier/Normal)
-     */
-    public function init_weights(): void
-    {
-        $this->params = [
-            'wte' => matrix($this->vocab_size, $this->n_embd),
-            'wpe' => matrix($this->block_size, $this->n_embd),
-            'lm_head' => matrix($this->vocab_size, $this->n_embd)
-        ];
-
-        for ($i = 0; $i < $this->n_layer; $i++) {
-            $this->params["layer{$i}.attn_wq"] = matrix($this->n_embd, $this->n_embd);
-            $this->params["layer{$i}.attn_wk"] = matrix($this->n_embd, $this->n_embd);
-            $this->params["layer{$i}.attn_wv"] = matrix($this->n_embd, $this->n_embd);
-            $this->params["layer{$i}.attn_wo"] = matrix($this->n_embd, $this->n_embd, 0);
-            $this->params["layer{$i}.mlp_fc1"] = matrix(4 * $this->n_embd, $this->n_embd);
-            $this->params["layer{$i}.mlp_fc2"] = matrix($this->n_embd, 4 * $this->n_embd, 0);
-        }
-
-        $this->m = $this->v = array_fill(0, $this->n_params, 0.0);
-    }
-
-    public function train(array $docs, int $n_steps, float $learning_rate): void
+    public function train(array $docs, int $n_steps, float $learning_rate = 1e-2): void
     {
         $this->init_weights();
         $num_docs = count($docs);
@@ -97,7 +75,7 @@ class GPT_Run extends GPT_Base
             for ($pos_id = 0; $pos_id < $n; $pos_id++) {
                 $token_id = $tokens[$pos_id];
                 $target_id = $tokens[$pos_id + 1];
-                $probs = softmax(gpt($token_id, $pos_id, $keys, $values));
+                $probs = $this->softmax($this->gpt($token_id, $pos_id, $keys, $values));
                 $losses[] = $probs[$target_id]->log_val()->__neg();
             }
 
@@ -111,11 +89,11 @@ class GPT_Run extends GPT_Base
             // Adam update
             $lr_t = $learning_rate * (1 - $step / $n_steps); // Linear decay
             $i = 0;
-            array_walk_recursive($this->params, function($p) use (&$i, $lr_t, $step) {
+            array_walk_recursive($this->params, function($p) use (&$i, $lr_t, &$step) {
                 $this->m[$i] = $this->beta1 * $this->m[$i] + (1 - $this->beta1) * $p->grad;
                 $this->v[$i] = $this->beta2 * $this->v[$i] + (1 - $this->beta2) * ($p->grad ** 2);
-                $m_hat = $this->m[$i] / (1 - pow($this->beta1, $step));
-                $v_hat = $this->v[$i] / (1 - pow($this->beta2, $step));
+                $m_hat = $this->m[$i] / (1 - pow($this->beta1, $step + 1));
+                $v_hat = $this->v[$i] / (1 - pow($this->beta2, $step + 1));
                 $p->data -= $lr_t * $m_hat / (sqrt($v_hat) + $this->eps_adam);
                 $p->grad = 0;
                 $i++;
@@ -134,10 +112,10 @@ class GPT_Run extends GPT_Base
             $out = '';
 
             for ($pos_id = 0; $pos_id < $this->block_size; $pos_id++) {
-                $logits = gpt($token_id, $pos_id, $keys, $values);
+                $logits = $this->gpt($token_id, $pos_id, $keys, $values);
                 $scaled_logits = array_map(fn($l) => $l->__div($temperature), $logits);
-                $weights = array_map(fn($p) => $p->data, softmax($scaled_logits));
-                $token_id = random_choices(range(0, $this->vocab_size - 1), $weights);
+                $weights = array_map(fn($p) => $p->data, $this->softmax($scaled_logits));
+                $token_id = $this->random_choices(range(0, $this->vocab_size - 1), $weights);
 
                 if ($token_id == $this->BOS)
                     break;

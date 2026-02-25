@@ -28,15 +28,15 @@ class GPT_Base
         for ($i = 0; $i < count($tok_emb); $i++) {
             $x[] = $tok_emb[$i]->__add($pos_emb[$i]);
         }
-        $x = rmsnorm_func($x);
+        $x = $this->rmsnorm($x);
         
         for ($li = 0; $li < $this->n_layer; $li++) {
             // Multi-head attention block
             $x_residual = $x;
-            $x = rmsnorm_func($x);
-            $q = linear_layer($x, $this->params["layer{$li}.attn_wq"]);
-            $k = linear_layer($x, $this->params["layer{$li}.attn_wk"]);
-            $v = linear_layer($x, $this->params["layer{$li}.attn_wv"]);
+            $x = $this->rmsnorm($x);
+            $q = $this->linear_layer($x, $this->params["layer{$li}.attn_wq"]);
+            $k = $this->linear_layer($x, $this->params["layer{$li}.attn_wk"]);
+            $v = $this->linear_layer($x, $this->params["layer{$li}.attn_wv"]);
             
             $keys[$li][] = $k;
             $values[$li][] = $v;
@@ -65,7 +65,7 @@ class GPT_Base
                     $attn_logits[] = $sum->__div(sqrt($this->head_dim));
                 }
                 
-                $attn_weights = softmax($attn_logits);
+                $attn_weights = $this->softmax($attn_logits);
                 
                 for ($j = 0; $j < $this->head_dim; $j++) {
                     $head_out_j = new Value(0);
@@ -76,23 +76,123 @@ class GPT_Base
                 }
             }
             
-            $x = linear_layer($x_attn, $this->params["layer{$li}.attn_wo"]);
+            $x = $this->linear_layer($x_attn, $this->params["layer{$li}.attn_wo"]);
             for ($i = 0; $i < count($x); $i++) {
                 $x[$i] = $x[$i]->__add($x_residual[$i]);
             }
             
             // MLP block
             $x_residual = $x;
-            $x = rmsnorm_func($x);
-            $x = linear_layer($x, $this->params["layer{$li}.mlp_fc1"]);
+            $x = $this->rmsnorm($x);
+            $x = $this->linear_layer($x, $this->params["layer{$li}.mlp_fc1"]);
             $x = array_map(fn($xi) => $xi->relu()->__pow(2), $x);
-            $x = linear_layer($x, $this->params["layer{$li}.mlp_fc2"]);
+            $x = $this->linear_layer($x, $this->params["layer{$li}.mlp_fc2"]);
             for ($i = 0; $i < count($x); $i++) {
                 $x[$i] = $x[$i]->__add($x_residual[$i]);
             }
         }
         
-        return linear_layer($x, $this->params['lm_head']);
+        return $this->linear_layer($x, $this->params['lm_head']);
+    }
+
+    // Box-Muller transform for Gaussian random numbers
+    function random_gauss($mean = 0, $std = 1) {
+        static $spare = null;
+        static $has_spare = false;
+
+        if ($has_spare) {
+            $has_spare = false;
+            return $spare * $std + $mean;
+        }
+
+        $u = mt_rand() / mt_getrandmax();
+        $v = mt_rand() / mt_getrandmax();
+        $u = $u < 1e-10 ? 1e-10 : $u;
+
+        $mag = $std * sqrt(-2.0 * log($u));
+        $spare = $mag * sin(2.0 * pi() * $v);
+        $has_spare = true;
+
+        return $mag * cos(2.0 * pi() * $v) + $mean;
+    }
+
+    public function matrix($nout, $nin, $std = 0.02) {
+        $result = [];
+        for ($i = 0; $i < $nout; $i++) {
+            $row = [];
+            for ($j = 0; $j < $nin; $j++) {
+                $row[] = new Value($this->random_gauss(0, $std));
+            }
+            $result[] = $row;
+        }
+        return $result;
+    }
+
+    /**
+     * Инициализация случайных весов (Xavier/Normal)
+     */
+    public function init_weights(): void
+    {
+        $this->params = [
+            'wte' => $this->matrix($this->vocab_size, $this->n_embd),
+            'wpe' => $this->matrix($this->block_size, $this->n_embd),
+            'lm_head' => $this->matrix($this->vocab_size, $this->n_embd)
+        ];
+
+        for ($i = 0; $i < $this->n_layer; $i++) {
+            $this->params["layer{$i}.attn_wq"] = $this->matrix($this->n_embd, $this->n_embd);
+            $this->params["layer{$i}.attn_wk"] = $this->matrix($this->n_embd, $this->n_embd);
+            $this->params["layer{$i}.attn_wv"] = $this->matrix($this->n_embd, $this->n_embd);
+            $this->params["layer{$i}.attn_wo"] = $this->matrix($this->n_embd, $this->n_embd, 0);
+            $this->params["layer{$i}.mlp_fc1"] = $this->matrix(4 * $this->n_embd, $this->n_embd);
+            $this->params["layer{$i}.mlp_fc2"] = $this->matrix($this->n_embd, 4 * $this->n_embd, 0);
+        }
+
+        $this->m = $this->v = array_fill(0, $this->n_params, 0.0);
+    }
+
+    function random_choices($population, $weights) {
+        $total = array_sum($weights);
+        $rand = mt_rand() / mt_getrandmax() * $total;
+        $cumulative = 0;
+        foreach ($population as $i => $item) {
+            $cumulative += $weights[$i];
+            if ($rand <= $cumulative) {
+                return $item;
+            }
+        }
+        return $population[count($population) - 1];
+    }
+
+    function linear_layer($x, $w) {
+        $result = [];
+        foreach ($w as $wo) {
+            $sum = new Value(0);
+            foreach ($wo as $i => $wi) {
+                $sum = $sum->__add($wi->__mul($x[$i]));
+            }
+            $result[] = $sum;
+        }
+        return $result;
+    }
+
+    function softmax($logits) {
+        $max_val = max(array_map(fn($v) => $v->data, $logits));
+        $exps = array_map(fn($val) => $val->__sub($max_val)->exp_val(), $logits);
+        $total = new Value(0);
+        foreach ($exps as $e)
+            $total = $total->__add($e);
+        return array_map(fn($e) => $e->__div($total), $exps);
+    }
+
+    function rmsnorm($x) {
+        $ms = new Value(0);
+        foreach ($x as $xi) {
+            $ms = $ms->__add($xi->__mul($xi));
+        }
+        $ms = $ms->__div(count($x));
+        $scale = $ms->__add(1e-5)->__pow(-0.5);
+        return array_map(fn($xi) => $xi->__mul($scale), $x);
     }
 }
 

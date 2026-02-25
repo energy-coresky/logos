@@ -16,7 +16,6 @@ require 'gpt_pack.php';
 // ============================================================================
 
 // Let there be order among chaos
-
 mt_srand(37);
 
 // Let there be an input dataset
