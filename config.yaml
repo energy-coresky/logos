@@ -34,9 +34,26 @@ gpt:
     qtz: false 
     rnd: 42
   usage: $TAIL1
+
+data:
+  default:
+    filename: default_dataset
+    n_samples: 2000
+    max_val: 9
+    block_size: 8
+    type: ???
+  short:
+    fn: filename
+    n: n_samples
+    m: max_val
+    bs: block_size
+    t: type
+  v: []
+  usage: $TAIL2
 ~
 
-Run the Logos ware as:
+USAGE:
+Run the Logos ware (train &| inference) as:
 >sky logos z param1=value1 param2=value2 ...
 
 PARAMATERS:
@@ -64,3 +81,19 @@ Default configuration:
 %list_2%
 
 ~
+USAGE:
+  Run the Logos ware (dataset generation) as:
+  >sky logos g param1=value1 param2=value2 ...
+SHORT PARAMATERS:
+  %list_1%
+TYPES ARE: (one of is must)
+  math - Simple addition
+  dna - Synthetic DNA
+SAMPLES:
+  >sky logos g t=math n=500 fn=math_test
+  (generate math 500 samples dataset to file `txt/math_test.txt`)
+CURRENT CONFIGURATION:
+%list_2%
+
+~
+

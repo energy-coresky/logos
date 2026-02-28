@@ -1,7 +1,7 @@
 <?php
 
 namespace logos;
-use Plan, GPT_Run, GPT_Bin;
+use Plan, GPT_Run, GPT_Bin, GPT_Data;
 
 class app extends \Console
 {   // https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt
@@ -22,7 +22,7 @@ class app extends \Console
 
     /** Run train &| inference */
     function a_z(...$in) {
-        $v = $this->data($in, $cfg = cfg('gpt'));//print_r($v);
+        $v = $this->data($in, $cfg = cfg('gpt'));
         if (!$v->txt && !$v->bin)
             return $this->a_u();
         $time = time();
@@ -54,7 +54,19 @@ class app extends \Console
             echo "\nsample $i: $sample";
     }
 
-    /** See Logos usage */
+    /** Generate the datasets */
+    function a_g(...$in) {
+        $v = $this->data($in, $cfg = cfg('data'));
+        if (method_exists($gen = new GPT_Data, $type = $v->type)) {
+            $v->settings['filename'] = self::$d[1] . "/txt/" . $v->settings['filename'] . ".txt";
+            $gen->$type($v->settings);
+        } else echo strtr($cfg->usage, [
+            '%list_1%' => var_export($cfg->short, true),
+            '%list_2%' => var_export($v->settings, true),
+        ]);
+    }
+
+    /** See Logos usage (how run the model) */
     function a_u() {
         $cfg = cfg('gpt');
         $gpt = new GPT_Run($cfg->default);
@@ -62,10 +74,5 @@ class app extends \Console
             '%list_1%' => var_export($cfg->short, true),
             '%list_2%' => $gpt->info(array_keys($cfg->default)),
         ]);
-    }
-
-    /** Generate the dataset (2do) */
-    function a_g() {
-        var_export(1);
     }
 }
