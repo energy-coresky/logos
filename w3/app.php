@@ -10,21 +10,19 @@ class app extends \Console
     }
 
     function data($in, $cfg) {
-        $v = $cfg->v;
+        $v = (object)($cfg->v + $cfg->default);
         $v->settings = $this->args($in, $cfg->default, function (&$key, $val) use ($v, $cfg) {
-            if (isset($cfg->short[$key])) {
+            if ($set = isset($cfg->short[$key]))
                 $key = $cfg->short[$key];
-                return false;
-            }
             $v->$key = $val;
-            return true;
+            return !$set;
         });
         return $v;
     }
 
     /** Run train &| inference */
     function a_z(...$in) {
-        $v = $this->data($in, $cfg = cfg('gpt'));
+        $v = $this->data($in, $cfg = cfg('gpt'));//print_r($v);
         if (!$v->txt && !$v->bin)
             return $this->a_u();
         $time = time();
@@ -44,7 +42,7 @@ class app extends \Console
         echo "settings " . $gpt->info(array_keys($cfg->default)) . "\n";
 
         if (!$load_bin) {
-            foreach ($gpt->train($docs, $v->x, $v->learning_rate) as $i => $loss)
+            foreach ($gpt->train($docs, $v->n_train, $v->learning_rate) as $i => $loss)
                 echo "\rstep $i | loss $loss | seconds " . (time() - $time) . '     ';
             if ($v->qtz) {
                 $qtz = $v->qtz == 4 ? GPT_Pack::Q_INT4 : ($v->qtz == 8 ? GPT_Pack::Q_INT8 : GPT_Pack::Q_FP32);
@@ -52,7 +50,7 @@ class app extends \Console
                 GPT_Pack::save(self::$d[1] . "/bin/$v->bin.bin", $gpt->params, $v->settings, $qtz);
             }
         }
-        foreach ($gpt->inference($v->temperature, $v->y) as $i => $sample)
+        foreach ($gpt->inference($v->temperature, $v->n_inference) as $i => $sample)
             echo "\nsample $i: $sample";
     }
 

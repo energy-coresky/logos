@@ -8,73 +8,54 @@ class GPT_Pack
 
     public static function save(string $filename, array $state_dict, array $settings, int $quantization = self::Q_INT8): void
     {
-        $metaLen = strlen($metaJson = json_encode($settings));
-        $header = pack('a4CV', 'GPT1', 2, $metaLen);
-        $header .= $metaJson . pack('CV', $quantization, count($state_dict));
-        $dataBlob = '';
+        $len = strlen($json = json_encode($settings));
+        $header = pack('a4CV', 'GPT1', 2, $len);
+        $header .= $json . pack('CV', $quantization, count($state_dict));
+        $blob = '';
         foreach ($state_dict as $layerName => $weights) {
             $flatWeights = self::flatten($weights);
             $shape = self::getShape($weights);
             $header .= pack('S', strlen($layerName)) . $layerName;
             $header .= pack('C', count($shape));
-            foreach ($shape as $dim) {
+            foreach ($shape as $dim)
                 $header .= pack('L', $dim);
-            }
-            $packedData = self::quantize($flatWeights, $quantization);
-            $header .= pack('L', strlen($packedData));
-            $dataBlob .= $packedData;
+            $packed = self::quantize($flatWeights, $quantization);
+            $header .= pack('L', strlen($packed));
+            $blob .= $packed;
         }
-        file_put_contents($filename, $header . $dataBlob);
+        file_put_contents($filename, $header . $blob);
     }
 
     public static function load(string $filename): ?array
     {
-        $binary = file_get_contents($filename);
-        $offset = 0;
-        if (strlen($binary) < 7)
-            return null;
-        $mainHeader = unpack('a4magic/Cversion/Vmeta_len', $binary, $offset);
-        $offset += 7;
-        if ($mainHeader['magic'] !== 'GPT1')
-            return null;
-        $settings = [];
-        if ($mainHeader['meta_len'] > 0) {
-            $metaJson = substr($binary, $offset, $mainHeader['meta_len']);
-            $settings = json_decode($metaJson, true);
-            $offset += $mainHeader['meta_len'];
-        }
-        // Weights Header
-        if (strlen($binary) < $offset + 5)
-            return null;
-        $weightsHeader = unpack('Cquantization/Vlayer_count', $binary, $offset);
+        $header = unpack('a4magic/Cversion/Vmeta_len', $binary = file_get_contents($filename), 0);
+        if ($header['magic'] !== 'GPT1')
+            throw new Error('Error in file format');
+        $json = substr($binary, 9, $header['meta_len']);
+        $offset = 9 + $header['meta_len'];
+        $header = unpack('Cquantization/Vlayer_count', $binary, $offset);
         $offset += 5;
-        $quantization = $weightsHeader['quantization'];
-        $layerCount = $weightsHeader['layer_count'];
-        $state_dict = [];
-        for ($i = 0; $i < $layerCount; $i++) {
+        for ($i = 0; $i < $header['layer_count']; $i++) {
             $meta = unpack('Sname_len', $binary, $offset);
             $offset += 2;
             $layerName = substr($binary, $offset, $meta['name_len']);
             $offset += $meta['name_len'];
             $meta = unpack('Cdims_count', $binary, $offset);
             $offset += 1;
-            $dimsCount = $meta['dims_count'];
-            $shape = [];
-            $shapeFormat = '';
-            for ($d = 0; $d < $dimsCount; $d++)
-                $shapeFormat .= ($d ? '/' : '') . 'Ldim' . $d;
-            $shapeData = unpack($shapeFormat, $binary, $offset);
-            $offset += 4 * $dimsCount;
+            for ($format = '', $d = 0; $d < $meta['dims_count']; $d++)
+                $format .= ($d ? '/' : '') . 'Ldim' . $d;
+            $shape = unpack($format, $binary, $offset);
+            $offset += 4 * $meta['dims_count'];
             $meta = unpack('Ldata_len', $binary, $offset);
             $offset += 4;
-            $state_dict[$layerName] = [array_values($shapeData), $meta['data_len']];
+            $state_dict[$layerName] = [array_values($shape), $meta['data_len']];
         }
         foreach ($state_dict as &$v) {
-            [$shape, $dataLen] = $v;
-            $v = self::dequantize(substr($binary, $offset, $dataLen), $shape, $quantization);
-            $offset += $dataLen;
+            [$shape, $len] = $v;
+            $v = self::dequantize(substr($binary, $offset, $len), $shape, $header['quantization']);
+            $offset += $len;
         }
-        return [$settings, $state_dict];
+        return [json_decode($json, true), $state_dict];
     }
 
     private static function quantize(array $weights, int $type): string
@@ -151,14 +132,14 @@ class GPT_Pack
         }
         return self::reshape($weights, $shape);
     }
-    
+
     private static function flatten(array $array): array {
         $flat = [];
         foreach (new RecursiveIteratorIterator(new RecursiveArrayIterator($array)) as $value)
             $flat[] = $value;
         return $flat;
     }
-    
+
     private static function getShape(array $ref): array {
         $shape = [];
         while (is_array($ref)) {
@@ -167,7 +148,7 @@ class GPT_Pack
         }
         return $shape;
     }
-    
+
     private static function reshape(array $flat, array $shape): array {
         if (empty($shape))
             return $flat;

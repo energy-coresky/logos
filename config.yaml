@@ -26,7 +26,7 @@ gpt:
     r: learning_rate
     t: temperature
   str: [Default configuration:, Running with:]
-  v: @object
+  v:
     settings: []
     is_train: true
     txt: false
@@ -52,7 +52,7 @@ SAMPLES:
   >sky logos z bin=math y=11
   (inference only: run file-model from `bin/math.bin` path)
 
-  >sky logos z txt=math bin=math x=10000
+  >sky logos z txt=math bin=math x=10000 qtz=4
   (train 10000 steps, then save `bin/math.bin` model-file)
 
   TODO: continue training bin-model
