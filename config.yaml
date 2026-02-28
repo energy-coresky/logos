@@ -3,3 +3,64 @@ core:
     app:
       type: dev
     view: {path: $SELF/mvc}
+
+gpt:
+  default:
+    n_embd: 32
+    n_head: 4
+    n_layer: 2
+    block_size: 8
+    grad_clip: 1.0
+    n_train: 500
+    n_inference: 10
+    learning_rate: 1e-2
+    temperature: 0.6
+  short:
+    e: n_embd
+    l: n_layer
+    h: n_head
+    x: n_train
+    y: n_inference
+    b: block_size
+    c: grad_clip
+    r: learning_rate
+    t: temperature
+  str: [Default configuration:, Running with:]
+  v: @object
+    settings: []
+    is_train: true
+    txt: false
+    bin: false 
+    qtz: false 
+    rnd: 42
+  usage: $TAIL1
+~
+
+Run the Logos ware as:
+>sky logos z param1=value1 param2=value2 ...
+
+PARAMATERS:
+  txt: take dataset file from `txt` dir
+  bin: load or save bin-file model;
+  qtz: bin-file will written if quantization present; options: 4|8|32
+  rnd: exec mt_srand(num); mt_srand(42) by default; set rnd=0 to turn off
+  + see single-character parameters below
+SAMPLES:
+  >sky logos z txt=math x=500 y=11
+  (take dataset from `txt/math.txt` path)
+
+  >sky logos z bin=math y=11
+  (inference only: run file-model from `bin/math.bin` path)
+
+  >sky logos z txt=math bin=math x=10000
+  (train 10000 steps, then save `bin/math.bin` model-file)
+
+  TODO: continue training bin-model
+
+Single-character parameters:
+%list_1%
+
+Default configuration:
+%list_2%
+
+~

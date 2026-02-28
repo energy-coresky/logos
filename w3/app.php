@@ -1,44 +1,73 @@
 <?php
 
 namespace logos;
-use Plan, GPT_Run;
+use Plan, GPT_Run, GPT_Pack;
 
 class app extends \Console
-{
+{   // https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt
     function __construct($argv = [], $found = []) {
         Plan::set('logos', fn() => parent::__construct($argv, $found));
     }
 
-    /** Run train & inference */
-    function a_run($n_steps = 300) { // https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt
-        // Let there be order among chaos
-        mt_srand(37);
-        $lines = array_map('trim', file(self::$d[1] . '/txt/names.txt'));
-        $docs = array_values(array_filter($lines, fn($l) => !empty($l)));
-        shuffle($docs);
+    function data($in, $cfg) {
+        $v = $cfg->v;
+        $v->settings = $this->args($in, $cfg->default, function (&$key, $val) use ($v, $cfg) {
+            if (isset($cfg->short[$key])) {
+                $key = $cfg->short[$key];
+                return false;
+            }
+            $v->$key = $val;
+            return true;
+        });
+        return $v;
+    }
+
+    /** Run train &| inference */
+    function a_z(...$in) {
+        $v = $this->data($in, $cfg = cfg('gpt'));
+        if (!$v->txt && !$v->bin)
+            return $this->a_u();
+        $time = time();
+        if ($load_bin = !$v->qtz && $v->bin) {
+            [$v->settings, $state_dict] = GPT_Pack::load(self::$d[1] . "/bin/$v->bin.bin");
+            $v->txt = $v->settings['dataset'];
+        }
+        $v->rnd && mt_srand($v->rnd);
+        $gpt = new GPT_Run($v->settings);
+        if ($load_bin)
+            $gpt->params = $state_dict;
+        $docs = $gpt->build_vocab(self::$d[1] . "/txt/$v->txt.txt");
+        
         echo "num docs: " . count($docs) . "\n";
-        $gpt = new GPT_Run($docs);
         echo "vocab size: $gpt->vocab_size\n";
-        foreach ($gpt->train($docs, $n_steps) as $i => $loss)
-            echo "\rstep $i / $n_steps | loss $loss";
-        foreach ($gpt->inference(0.6, 11) as $i => $sample)
+        echo "num params: $gpt->n_params\n";
+        echo "settings " . $gpt->info(array_keys($cfg->default)) . "\n";
+
+        if (!$load_bin) {
+            foreach ($gpt->train($docs, $v->x, $v->learning_rate) as $i => $loss)
+                echo "\rstep $i | loss $loss | seconds " . (time() - $time) . '     ';
+            if ($v->qtz) {
+                $qtz = $v->qtz == 4 ? GPT_Pack::Q_INT4 : ($v->qtz == 8 ? GPT_Pack::Q_INT8 : GPT_Pack::Q_FP32);
+                $v->settings['dataset'] = $v->txt;
+                GPT_Pack::save(self::$d[1] . "/bin/$v->bin.bin", $gpt->params, $v->settings, $qtz);
+            }
+        }
+        foreach ($gpt->inference($v->temperature, $v->y) as $i => $sample)
             echo "\nsample $i: $sample";
     }
 
-    /** Generate the dataset */
-    function a_gen() {
-/* 
-        //var_export($state_dict);
-        require 'param.php';
+    /** See Logos usage */
+    function a_u() {
+        $cfg = cfg('gpt');
+        $gpt = new GPT_Run($cfg->default);
+        echo strtr($cfg->usage, [
+            '%list_1%' => var_export($cfg->short, true),
+            '%list_2%' => $gpt->info(array_keys($cfg->default)),
+        ]);
+    }
 
-        #file_put_contents('gpt-model-vINT5.bin', GPT_Pack::encode($state_dict, GPT_Pack::Q_INT4));die;
-
-        //$state_dict = GPT_pack::decode(file_get_contents('gpt-model-vINT4.bin'));
-        #$state_dict = GPT_pack::decode(file_get_contents('gpt-model-vFP32.bin'));
-
-        #var_export($state_dict);
-        print(11);
-*/
-        print(11);
+    /** Generate the dataset (2do) */
+    function a_g() {
+        var_export(1);
     }
 }
