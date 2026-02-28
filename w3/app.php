@@ -39,7 +39,7 @@ class app extends \Console
         echo "num docs: " . count($docs) . "\n";
         echo "vocab size: $gpt->vocab_size\n";
         echo "num params: $gpt->n_params\n";
-        echo "settings:\n" . $gpt->info(array_keys($cfg->default)) . "\n";
+        echo "=============\n" . $gpt->info(array_keys($cfg->default)) . "\n";
 
         if (!$load_bin) {
             foreach ($gpt->train($docs, $v->n_train, $v->learning_rate) as $i => $loss)
@@ -50,6 +50,7 @@ class app extends \Console
                 GPT_Bin::save(self::$d[1] . "/bin/$v->bin.bin", $gpt->params, $v->settings, $qtz);
             }
         }
+        echo "INFERENCE:\n";
         foreach ($gpt->inference($v->temperature, $v->n_inference) as $i => $sample)
             echo "\nsample $i: $sample";
     }
