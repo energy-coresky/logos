@@ -1,7 +1,7 @@
 <?php
 
 namespace logos;
-use Plan, GPT_Run, GPT_Pack;
+use Plan, GPT_Run, GPT_Bin;
 
 class app extends \Console
 {   // https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt
@@ -27,7 +27,7 @@ class app extends \Console
             return $this->a_u();
         $time = time();
         if ($load_bin = !$v->qtz && $v->bin) {
-            [$v->settings, $state_dict] = GPT_Pack::load(self::$d[1] . "/bin/$v->bin.bin");
+            [$v->settings, $state_dict] = GPT_Bin::load(self::$d[1] . "/bin/$v->bin.bin");
             $v->txt = $v->settings['dataset'];
         }
         $v->rnd && mt_srand($v->rnd);
@@ -39,15 +39,15 @@ class app extends \Console
         echo "num docs: " . count($docs) . "\n";
         echo "vocab size: $gpt->vocab_size\n";
         echo "num params: $gpt->n_params\n";
-        echo "settings " . $gpt->info(array_keys($cfg->default)) . "\n";
+        echo "settings:\n" . $gpt->info(array_keys($cfg->default)) . "\n";
 
         if (!$load_bin) {
             foreach ($gpt->train($docs, $v->n_train, $v->learning_rate) as $i => $loss)
                 echo "\rstep $i | loss $loss | seconds " . (time() - $time) . '     ';
             if ($v->qtz) {
-                $qtz = $v->qtz == 4 ? GPT_Pack::Q_INT4 : ($v->qtz == 8 ? GPT_Pack::Q_INT8 : GPT_Pack::Q_FP32);
+                $qtz = $v->qtz == 4 ? GPT_Bin::Q_INT4 : ($v->qtz == 8 ? GPT_Bin::Q_INT8 : GPT_Bin::Q_FP32);
                 $v->settings['dataset'] = $v->txt;
-                GPT_Pack::save(self::$d[1] . "/bin/$v->bin.bin", $gpt->params, $v->settings, $qtz);
+                GPT_Bin::save(self::$d[1] . "/bin/$v->bin.bin", $gpt->params, $v->settings, $qtz);
             }
         }
         foreach ($gpt->inference($v->temperature, $v->n_inference) as $i => $sample)

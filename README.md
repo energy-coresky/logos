@@ -16,7 +16,7 @@ The architecture is based on Andrej Karpathy's **micrograd** and **nanoGPT** pro
 *   **Pure PHP Implementation**: No heavy dependencies, runs on standard PHP 8.0+.
 *   **Autograd Engine**: Includes a `Value` class for automatic differentiation (backpropagation).
 *   **Transformer Architecture**: Supports configurable layers, heads, and embedding sizes.
-*   **Binary Serialization**: Custom `GPT_Pack` class supports FP32, INT8, and INT4 quantization for efficient model storage.
+*   **Binary Serialization**: Custom `GPT_Bin` class supports FP32, INT8, and INT4 quantization for efficient model storage.
 *   **Sandbox Ready**: Designed for the Coresky DEV-TOOLS environment.
 
 ## Quick Start (PHP API)
@@ -36,13 +36,18 @@ $gpt->init_weights();
 $gpt->train($docs, $n_steps = 2000, $learning_rate = 0.0003);
 
 // 4. Inference
+$gpt->params = GPT_Bin::decode(file_get_contents($filename));
+// Init grads structure matching loaded params
+$gpt->grads = $gpt->params;
+array_walk_recursive($gpt->grads, fn(&$v) => $v = 0.0);
+$gpt->m = $gpt->v = array_fill(0, $gpt->n_params, 0.0);
 foreach ($gpt->inference(0.6, 5) as $sample) {
     echo "Generated: " . $sample . "\n";
 }
 
 // 5. Save model (Quantized)
 $settings = ['n_layer' => 2, 'n_embd' => 32, 'dataset_file' => 'names.txt'];
-GPT_Pack::save('model.bin', $gpt->params, $settings, GPT_Pack::Q_INT8);
+GPT_Bin::save('model.bin', $gpt->params, $settings, GPT_Bin::Q_INT8);
 ```
 
 ## Console Usage (CLI)

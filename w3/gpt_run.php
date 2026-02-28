@@ -40,25 +40,6 @@ class GPT_Run extends GPT_Engine
         return $docs;
     }
 
-    function load(string $filename): void
-    {
-        if (!file_exists($filename))
-            throw new Error("File not found: $filename");
-        
-        $this->params = GPT_Pack::decode(file_get_contents($filename));
-        // Init grads structure matching loaded params
-        $this->grads = $this->params;
-        array_walk_recursive($this->grads, fn(&$v) => $v = 0.0);
-        
-        $this->m = $this->v = array_fill(0, $this->n_params, 0.0);
-    }
-
-    function save(string $filename, int $quantization = GPT_Pack::Q_FP32): void
-    {
-        $weights = $this->params;
-        file_put_contents($filename, GPT_Pack::encode($weights, $quantization));
-    }
-
     function init_weights(): void {
         $matrix = function ($nout, $nin, $std = 0.02) {
             // Box-Muller transform

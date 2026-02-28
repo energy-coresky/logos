@@ -1,6 +1,6 @@
 <?php
 
-class GPT_Pack
+class GPT_Bin
 {
     const Q_FP32 = 0; // 4 байта на вес
     const Q_INT8 = 1; // 1 байт на вес
