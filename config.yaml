@@ -9,9 +9,9 @@ gpt:
     n_embd: 16  # embedding dimension
     n_head: 4   # number of attention heads
     n_layer: 1  # number of layers
-    block_size: 8 # maximum sequence length
+    block_size: 16 # (8) maximum sequence length, note: the longest name is 15 characters
     grad_clip: 1.0
-    n_train: 500
+    n_train: 100
     n_inference: 10
     learning_rate: 1e-2 # learning_rate, beta1, beta2, eps_adam = 1e-2, 0.9, 0.95, 1e-8
     temperature: 0.6    # learning_rate, beta1, beta2, eps_adam = 0.01, 0.85, 0.99, 1e-8

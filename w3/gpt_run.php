@@ -10,13 +10,6 @@ class GPT_Run extends GPT_Engine
         $this->head_dim = intval($this->n_embd / $this->n_head);
     }
 
-    function info($prop) {
-        $out = '';
-        foreach ($prop as $v)
-            $out .= "$v: " . $this->$v . "\n";
-        return $out;
-    }
-
     function build_vocab(string $filename): array
     {
         $lines = array_map('trim', file($filename));

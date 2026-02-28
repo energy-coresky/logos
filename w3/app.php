@@ -30,6 +30,7 @@ class app extends \Console
             [$v->settings, $state_dict] = GPT_Bin::load(self::$d[1] . "/bin/$v->bin.bin");
             $v->txt = $v->settings['dataset'];
         }
+//print_r($v);die;
         $v->rnd && mt_srand($v->rnd);
         $gpt = new GPT_Run($v->settings);
         if ($load_bin)
@@ -38,21 +39,24 @@ class app extends \Console
         
         echo "num docs: " . count($docs) . "\n";
         echo "vocab size: $gpt->vocab_size\n";
-        echo "num params: $gpt->n_params\n";
-        echo "=============\n" . $gpt->info(array_keys($cfg->default)) . "\n";
+        echo "num params: $gpt->n_params\n=============\n";
+        foreach ($v->settings as $key => $val)
+            echo "$key: $val\n";
 
         if (!$load_bin) {
+            echo "TRAIN:\n";
             foreach ($gpt->train($docs, $v->n_train, $v->learning_rate) as $i => $loss)
-                echo "\rstep $i | loss $loss | seconds " . (time() - $time) . '     ';
+                echo "\r  step $i | loss $loss | seconds " . (time() - $time) . '     ';
             if ($v->qtz) {
                 $qtz = $v->qtz == 4 ? GPT_Bin::Q_INT4 : ($v->qtz == 8 ? GPT_Bin::Q_INT8 : GPT_Bin::Q_FP32);
                 $v->settings['dataset'] = $v->txt;
                 GPT_Bin::save(self::$d[1] . "/bin/$v->bin.bin", $gpt->params, $v->settings, $qtz);
             }
+            echo "\n";
         }
-        echo "INFERENCE:\n";
+        echo "INFERENCE:";
         foreach ($gpt->inference($v->temperature, $v->n_inference) as $i => $sample)
-            echo "\nsample $i: $sample";
+            echo "\n  sample $i: $sample";
     }
 
     /** Generate the datasets */
@@ -73,7 +77,7 @@ class app extends \Console
         $gpt = new GPT_Run($cfg->default);
         echo strtr($cfg->usage, [
             '%list_1%' => var_export($cfg->short, true),
-            '%list_2%' => $gpt->info(array_keys($cfg->default)),
+            '%list_2%' => var_export($cfg->default, true),
         ]);
     }
 }
