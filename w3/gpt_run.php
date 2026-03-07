@@ -8,11 +8,12 @@ class GPT_Run extends GPT_Engine
         foreach ($prop as $k => $v)
             $this->$k = $v;
         $this->head_dim = intval($this->n_embd / $this->n_head);
+        $this->scale_head = 1.0 / sqrt($this->head_dim);
     }
 
-    function build_vocab(string $filename): array
+    function build_vocab(string $name): array
     {
-        $lines = array_map('trim', file($filename));
+        $lines = array_map('trim', explode("\n", Plan::txt_g("$name.txt")));
         $docs = array_values(array_filter($lines, fn($l) => !empty($l)));
         shuffle($docs);
         $unique_chars = array_unique(str_split(implode('', $docs)));
@@ -20,8 +21,9 @@ class GPT_Run extends GPT_Engine
         $chars = array_merge(['<BOS>'], $unique_chars);
         $this->vocab_size = count($chars);
         $this->n_params = $this->n_embd * (
-            $this->block_size + 
-            2 * $this->vocab_size + 
+            1 + $this->block_size +
+            2 * ($this->n_layer + $this->vocab_size) +
+//           $this->block_size + 2 * $this->vocab_size +
             12 * $this->n_layer * $this->n_embd
         );
         $this->itos = $this->stoi = [];
@@ -58,227 +60,132 @@ class GPT_Run extends GPT_Engine
         $this->params = [
             'wte' => $matrix($this->vocab_size, $this->n_embd),
             'wpe' => $matrix($this->block_size, $this->n_embd),
-            'lm_head' => $matrix($this->vocab_size, $this->n_embd)
+            'lm_head' => $matrix($this->vocab_size, $this->n_embd),
+            'init_norm' => array_fill(0, $this->n_embd, 1.0), # params for rmsnorn
         ];
-
         for ($i = 0; $i < $this->n_layer; $i++) {
             $this->params["layer{$i}.attn_wq"] = $matrix($this->n_embd, $this->n_embd);
             $this->params["layer{$i}.attn_wk"] = $matrix($this->n_embd, $this->n_embd);
             $this->params["layer{$i}.attn_wv"] = $matrix($this->n_embd, $this->n_embd);
-            $this->params["layer{$i}.attn_wo"] = $matrix($this->n_embd, $this->n_embd, 0);
+           #$this->params["layer{$i}.attn_wo"] = $matrix($this->n_embd, $this->n_embd, 0);
+            $this->params["layer{$i}.attn_wo"] = $matrix($this->n_embd, $this->n_embd, 0.02 / sqrt(2 * $this->n_layer));
             $this->params["layer{$i}.mlp_fc1"] = $matrix(4 * $this->n_embd, $this->n_embd);
             $this->params["layer{$i}.mlp_fc2"] = $matrix($this->n_embd, 4 * $this->n_embd, 0);
+            $this->params["pre_att_{$i}"] = array_fill(0, $this->n_embd, 1.0); # params for rmsnorn
+            $this->params["pre_mlp_{$i}"] = array_fill(0, $this->n_embd, 1.0); # params for rmsnorn
         }
 
         $this->grads = $this->params;
-        array_walk_recursive($this->grads, fn(&$v) => $v = 0.0);
         $this->m = $this->v = array_fill(0, $this->n_params, 0.0);
     }
 
-    function _train(array $docs, int $n_steps, float $learning_rate = 1e-4, int $accum_steps = 1): Generator
-    {
+    function train(array $docs, int $n_steps): Generator {
         $this->init_weights();
         $n_docs = count($docs);
-        
-        for ($step = $i_docs = 0; $step < $n_steps; ) {
+        $i_docs = 0;
+        $min_lr = $this->learning_rate * 0.1;// $min_lr обычно ставят 10% от $this->learning_rate или 1e-5
+        $warmup_steps = 200;// Warmup на первые 200 шагов
+        for ($step = 0; $step < $n_steps; ) {
             array_walk_recursive($this->grads, fn(&$v) => $v = 0.0);
             $batch_loss = 0.0;
-            // --- Accumulation Loop ---
-            for ($acc = 0; $acc < $accum_steps; $acc++) {
+            for ($b = 0; $b < $this->batch_size; $b++) {
                 $tokens = str_split($docs[$i_docs++ % $n_docs]);
                 $tokens = array_merge([$this->BOS], array_map(fn($t) => $this->stoi[$t], $tokens), [$this->BOS]);
-                if (!$n = min($this->block_size, count($tokens) - 1))
-                    continue;
-
-                // --- Forward pass ---
-                $this->cache = $probs_all = [];
-                $keys = $values = array_fill(0, $this->n_layer, []);
-                
-                for ($pos_id = 0; $pos_id < $n; $pos_id++) {
-                    $token_id = $tokens[$pos_id];
-                    $logits = $this->gpt($token_id, $pos_id, $keys, $values, false);
-                    $probs_all[] = $this->softmax($logits);
-                }
-
-                // --- Backward pass ---
-                // Важно: мы НЕ обнуляем градиенты тут! Они накапливаются.
-                
-                for ($pos_id = $n - 1; $pos_id >= 0; $pos_id--) {
-                    $target_id = $tokens[$pos_id + 1];
-                    $probs = $probs_all[$pos_id];
-                    
-                    $batch_loss += -log($probs[$target_id] + 1e-9);
-
-                    $d_logits = $probs;
-                    $d_logits[$target_id] -= 1.0;
-                    
-                    // Делим на $n (длина примера) И на $accum_steps (размер батча)
-                    // Это усреднение градиента по всему "виртуальному батчу"
-                    foreach ($d_logits as &$v)
-                        $v /= ($n * $accum_steps);
-
-                    $x_final = $this->cache['x_final'][$pos_id];
-                    $this->accumulate_grad('lm_head', $d_logits, $x_final);
-                    $d_x = $this->backward_linear_input($d_logits, $this->params['lm_head']);
-                    
-                    for ($li = $this->n_layer - 1; $li >= 0; $li--) {
-                        $d_x = $this->backward_layer($d_x, $li, $pos_id, $keys, $values);
-                    }
-
-                    $token_id = $tokens[$pos_id];
-                    for ($i = 0; $i < $this->n_embd; $i++) {
-                        // Градиенты просто плюсуются
-                        $this->grads['wte'][$token_id][$i] += $d_x[$i];
-                        $this->grads['wpe'][$pos_id][$i] += $d_x[$i];
-                    }
-                }
+                $batch_loss += $this->train_one_doc($tokens);
             }
-
-            // --- Adam Optimizer Update (делается 1 раз на $accum_steps примеров) ---
-            // ... (код Adam без изменений) ...
-            // Считаем норму
+            // --- Adam Optimizer Update ---
             $grad_norm = 0.0;
             array_walk_recursive($this->grads, function($p) use (&$grad_norm) {
                 $grad_norm += $p ** 2;
             });
             $grad_norm = sqrt($grad_norm);
-            $scale = $grad_norm > $this->grad_clip ? $this->grad_clip / $grad_norm : 1.0;
+            $scale_clip = $grad_norm > $this->grad_clip ? $this->grad_clip / $grad_norm : 1.0;
             // Linear decay
-            $lr_t = $learning_rate * (1 - $step / $n_steps); 
+          # $lr_t = $this->learning_rate * (1 - $step / $n_steps);
+            # Cosine decay
+            if ($step < $warmup_steps) {
+                $lr_t = $this->learning_rate * ($step / $warmup_steps);
+            } else {
+                $decay_ratio = ($step - $warmup_steps) / ($n_steps - $warmup_steps);
+                $coeff = 0.5 * (1 + cos(pi() * $decay_ratio));
+                $lr_t = $min_lr + ($this->learning_rate - $min_lr) * $coeff;
+            }
+            // --- Adam Optimizer Update ---
+            $bias_correction1 = 1 - pow($this->beta1, $step + 1);
+            $bias_correction2 = 1 - pow($this->beta2, $step + 1);
             $idx = 0;
-            foreach ($this->params as $name => &$matrix) {
-                $rows = count($matrix);
-                $cols = count($matrix[0]);
+            foreach ($this->params as $name => &$p) {
+                $grads_block =& $this->grads[$name];
+                $is_matrix = isset($p[0]) && is_array($p[0]);
+                $rows = count($p);
                 for ($r = 0; $r < $rows; $r++) {
-                    for ($c = 0; $c < $cols; $c++) {
-                        $grad = $this->grads[$name][$r][$c] * $scale;
-                        // Adam math
+                    if ($is_matrix) {
+                        $row_grad =& $grads_block[$r]; 
+                        $cols = count($p[0]);
+                        for ($c = 0; $c < $cols; $c++) {
+                            $grad = $row_grad[$c] * $scale_clip;
+                            $this->m[$idx] = $this->beta1 * $this->m[$idx] + (1 - $this->beta1) * $grad;
+                            $this->v[$idx] = $this->beta2 * $this->v[$idx] + (1 - $this->beta2) * ($grad ** 2);
+                            $m_hat = $this->m[$idx] / $bias_correction1;
+                            $v_hat = $this->v[$idx] / $bias_correction2;
+                            $p[$r][$c] -= $lr_t * $m_hat / (sqrt($v_hat) + $this->eps_adam);
+                            $idx++;
+                        }
+                    } else {
+                        $grad = $grads_block[$r] * $scale_clip;
                         $this->m[$idx] = $this->beta1 * $this->m[$idx] + (1 - $this->beta1) * $grad;
                         $this->v[$idx] = $this->beta2 * $this->v[$idx] + (1 - $this->beta2) * ($grad ** 2);
-
-                        $m_hat = $this->m[$idx] / (1 - pow($this->beta1, $step + 1));
-                        $v_hat = $this->v[$idx] / (1 - pow($this->beta2, $step + 1));
-                        // Update weight
-                        $matrix[$r][$c] -= $lr_t * $m_hat / (sqrt($v_hat) + $this->eps_adam);
+                        $m_hat = $this->m[$idx] / $bias_correction1;
+                        $v_hat = $this->v[$idx] / $bias_correction2;
+                        $p[$r] -= $lr_t * $m_hat / (sqrt($v_hat) + $this->eps_adam);
                         $idx++;
                     }
                 }
             }
-            yield ++$step => ($batch_loss / $accum_steps);
+            yield ++$step => $batch_loss / $this->batch_size;
         }
     }
 
+    function train_one_doc(array $tokens): float {
+        $n = min($this->block_size, count($tokens) - 1);
+        $this->cache = $probs_all = [];
+        $keys = $values = array_fill(0, $this->n_layer, []);
+        $loss = 0.0;
 
-
-    function train(array $docs, int $n_steps, float $learning_rate = 1e-2): Generator
-    {
-        $this->init_weights();
-        $n_docs = count($docs);
-        
-        for ($step = 0; $step < $n_steps; ) {
-            $tokens = str_split($docs[$step % $n_docs]);
-            $tokens = array_merge([$this->BOS], array_map(fn($t) => $this->stoi[$t], $tokens), [$this->BOS]);
-            $n = min($this->block_size, count($tokens) - 1);
-
-            // --- 1. Forward pass ---
-            $this->cache = $probs_all = [];
-            $keys = $values = array_fill(0, $this->n_layer, []);
-            
-            for ($pos_id = 0; $pos_id < $n; $pos_id++) {
-                $token_id = $tokens[$pos_id];
-                $logits = $this->gpt($token_id, $pos_id, $keys, $values, false);
-                $probs_all[] = $this->softmax($logits);
-            }
-
-            // --- 2. Backward pass ---
-            // Обнуляем градиенты перед накоплением
-            array_walk_recursive($this->grads, fn(&$v) => $v = 0.0);
-            
-            $loss = 0.0;
-            
-            // Идем в обратном порядке по токенам
-            for ($pos_id = $n - 1; $pos_id >= 0; $pos_id--) {
-                $target_id = $tokens[$pos_id + 1];
-                $probs = $probs_all[$pos_id];
-                
-                // Вычисляем Loss (для вывода)
-                $loss += -log($probs[$target_id] + 1e-9);
-
-                // Градиент функции потерь (Softmax + CrossEntropy)
-                // d_loss/d_logits = probs - one_hot(target)
-                $d_logits = $probs;
-                $d_logits[$target_id] -= 1.0;
-                
-                // Нормализуем градиент на количество токенов (усреднение лосса)
-                foreach ($d_logits as &$v) $v /= $n;
-
-                // Backprop через LM Head (последний линейный слой)
-                $x_final = $this->cache['x_final'][$pos_id];
-                
-                // Градиент по весам lm_head: dW = dy * x^T
-                $this->accumulate_grad('lm_head', $d_logits, $x_final);
-                
-                // Градиент на вход x (d_x), чтобы передать в трансформер: d_x = dy * W
-                $d_x = $this->backward_linear_input($d_logits, $this->params['lm_head']);
-                
-                // Backprop через слои Трансформера (от последнего к первому)
-                for ($li = $this->n_layer - 1; $li >= 0; $li--) {
-                    $d_x = $this->backward_layer($d_x, $li, $pos_id, $keys, $values);
-                }
-                
-                // Backprop через начальную нормализацию (Init Norm)
-                // В упрощенной реализации rmsnorm мы считаем scale константой для backward
-                // или применяем точную формулу. Здесь берем упрощение: d_x_in = d_x_out * scale.
-                // Для полноценной реализации нужен backward_rmsnorm, но для обучения "и так сойдет"
-                // часто достаточно простой передачи градиента, если scale близок к 1.
-
-                // Backprop через Embeddings
-                // x = wte[token] + wpe[pos]
-                // Градиенты просто прибавляются к соответствующим строкам матриц wte и wpe
-                $token_id = $tokens[$pos_id];
-                for ($i = 0; $i < $this->n_embd; $i++) {
-                    $this->grads['wte'][$token_id][$i] += $d_x[$i];
-                    $this->grads['wpe'][$pos_id][$i] += $d_x[$i];
-                }
-            }
-            $loss /= $n;
-
-            // --- 3. Adam Optimizer Update ---
-            // Считаем норму градиента (длину вектора всех градиентов)
-            $grad_norm = 0.0;
-            array_walk_recursive($this->grads, function($p) use (&$grad_norm) {
-                $grad_norm += $p ** 2;
-            });
-            $grad_norm = sqrt($grad_norm);
-            // Если норма слишком большая - масштабируем (клиппинг)
-            $scale = $grad_norm > $this->grad_clip ? $this->grad_clip / $grad_norm : 1.0;
-            $lr_t = $learning_rate * (1 - $step / $n_steps); // Linear decay
-            $idx = 0;
-            foreach ($this->params as $name => &$matrix) {
-                $rows = count($matrix);
-                $cols = count($matrix[0]);
-                for ($r = 0; $r < $rows; $r++) {
-                    for ($c = 0; $c < $cols; $c++) {
-                        $grad = $this->grads[$name][$r][$c] * $scale;
-                        // Adam math
-                        $this->m[$idx] = $this->beta1 * $this->m[$idx] + (1 - $this->beta1) * $grad;
-                        $this->v[$idx] = $this->beta2 * $this->v[$idx] + (1 - $this->beta2) * ($grad ** 2);
-
-                        $m_hat = $this->m[$idx] / (1 - pow($this->beta1, $step + 1));
-                        $v_hat = $this->v[$idx] / (1 - pow($this->beta2, $step + 1));
-
-                        // Update weight
-                        $matrix[$r][$c] -= $lr_t * $m_hat / (sqrt($v_hat) + $this->eps_adam);
-                        $idx++;
-                    }
-                }
-            }
-            yield ++$step => $loss;
+        for ($pos_id = 0; $pos_id < $n; $pos_id++) {
+            $token_id = $tokens[$pos_id];
+            $logits = $this->gpt($token_id, $pos_id, $keys, $values, false);
+            $probs_all[] = $this->softmax($logits);
         }
+
+        for ($pos_id = $n - 1; $pos_id >= 0; $pos_id--) {
+            $target_id = $tokens[$pos_id + 1];
+            $d_logits = $probs_all[$pos_id];
+            $loss += -log($d_logits[$target_id] + 1e-9);
+            $d_logits[$target_id] -= 1.0;
+            foreach ($d_logits as &$v)
+                $v /= ($n * $this->batch_size);
+
+            $x_final = $this->cache['x_final'][$pos_id];
+            $this->accumulate_grad('lm_head', $d_logits, $x_final);
+            $d_x = $this->backward_linear_input($d_logits, $this->params['lm_head']);
+
+            for ($li = $this->n_layer - 1; $li >= 0; $li--) {
+                $d_x = $this->backward_layer($d_x, $li, $pos_id, $keys, $values);
+            }
+
+            $d_x = $this->backward_rmsnorm($d_x, 'init_norm', $pos_id);
+
+            $token_id = $tokens[$pos_id];
+            for ($i = 0; $i < $this->n_embd; $i++) {
+                $this->grads['wte'][$token_id][$i] += $d_x[$i];
+                $this->grads['wpe'][$pos_id][$i] += $d_x[$i];
+            }
+        }
+        return $loss / $n;
     }
 
-    function inference(float $temperature = 0.6, int $count = 10): Generator
-    {
+    function __inference(float $temperature = 0.6, int $count = 10): Generator {
         for ($i = 0; $i < $count; ) {
             $keys = $values = array_fill(0, $this->n_layer, []);
             $token_id = $this->BOS;
@@ -297,5 +204,74 @@ class GPT_Run extends GPT_Engine
             }
             yield ++$i => $out;
         }
+    }
+    function inference(float $temperature = 0.6, int $count = 10, string $prompt = ''): Generator {
+        // 1. Токенизация промпта
+        $prompt_tokens = [];
+        // Разбиваем строку на символы и преобразуем в ID
+        foreach (str_split($prompt) as $char) {
+            if (isset($this->stoi[$char])) {
+                $prompt_tokens[] = $this->stoi[$char];
+            }
+        }
+
+        for ($i = 0; $i < $count; ) {
+            $keys = $values = array_fill(0, $this->n_layer, []);
+            $out = '';
+            
+            // 2. Обработка BOS (начало последовательности)
+            // Модель ожидает BOS в начале, как при обучении
+            $token_id = $this->BOS;
+            // Получаем логиты для позиции 0. Они предсказывают первый токен.
+            $logits = $this->gpt($token_id, 0, $keys, $values);
+            
+            // Текущая позиция в последовательности (0 уже занят BOS)
+            $current_pos = 1;
+
+            // 3. Prefill: "Скармливаем" промпт модели
+            // Мы проходим по токенам промпта и обновляем KV-кэш, 
+            // но не выводим результат, а просто запоминаем предсказание для следующего шага.
+            foreach ($prompt_tokens as $p_token) {
+                // Подаем токен промпта на вход
+                $logits = $this->gpt($p_token, $current_pos, $keys, $values);
+                $current_pos++;
+            }
+            
+            // Теперь $logits содержит вероятности для ПЕРВОГО токена ответа
+            // $current_pos указывает на позицию этого токена.
+
+            // 4. Generation: Генерация ответа
+            // Начинаем цикл с текущей позиции до конца block_size
+            for ($pos_id = $current_pos; $pos_id < $this->block_size; $pos_id++) {
+                // Apply temperature
+                $scaled_logits = array_map(fn($l) => $l / $temperature, $logits);
+                $weights = $this->softmax($scaled_logits);
+                
+                $token_id = $this->random_choices(range(0, $this->vocab_size - 1), $weights);
+                
+                // Если встретили BOS или перенос строки (обычно конец примера в датасете) - останавливаемся
+                if ($token_id == $this->BOS || ($this->itos[$token_id] ?? '') === "\n") {
+                    break;
+                }
+                
+                $out .= $this->itos[$token_id];
+                
+                // Генерируем логиты для следующего шага
+                $logits = $this->gpt($token_id, $pos_id, $keys, $values);
+            }
+            
+            yield ++$i => $out;
+        }
+    }
+
+    function random_choices($population, $weights) {
+        $rand = mt_rand() / mt_getrandmax() * array_sum($weights);
+        $cumulative = 0;
+        foreach ($population as $i => $item) {
+            $cumulative += $weights[$i];
+            if ($rand <= $cumulative)
+                return $item;
+        }
+        return $population[count($population) - 1];
     }
 }

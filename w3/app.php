@@ -4,7 +4,7 @@ namespace logos;
 use Plan, GPT_Run, GPT_Bin, GPT_Data;
 
 class app extends \Console
-{   // https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt
+{
     function __construct($argv = [], $found = []) {
         Plan::set('logos', fn() => parent::__construct($argv, $found));
     }
@@ -27,15 +27,14 @@ class app extends \Console
             return $this->a_u();
         $time = time();
         if ($load_bin = !$v->qtz && $v->bin) {
-            [$v->settings, $state_dict] = GPT_Bin::load(self::$d[1] . "/bin/$v->bin.bin");
+            [$v->settings, $state_dict] = GPT_Bin::load($v->bin);
             $v->txt = $v->settings['dataset'];
         }
-//print_r($v);die;
         $v->rnd && mt_srand($v->rnd);
         $gpt = new GPT_Run($v->settings);
         if ($load_bin)
             $gpt->params = $state_dict;
-        $docs = $gpt->build_vocab(self::$d[1] . "/txt/$v->txt.txt");
+        $docs = $gpt->build_vocab($v->txt);
         
         echo "num docs: " . count($docs) . "\n";
         echo "vocab size: $gpt->vocab_size\n";
@@ -50,7 +49,7 @@ class app extends \Console
             if ($v->qtz) {
                 $qtz = $v->qtz == 4 ? GPT_Bin::Q_INT4 : ($v->qtz == 8 ? GPT_Bin::Q_INT8 : GPT_Bin::Q_FP32);
                 $v->settings['dataset'] = $v->txt;
-                GPT_Bin::save(self::$d[1] . "/bin/$v->bin.bin", $gpt->params, $v->settings, $qtz);
+                GPT_Bin::save($v->bin, $gpt->params, $v->settings, $qtz);
             }
             echo "\n";
         }
@@ -59,11 +58,35 @@ class app extends \Console
             echo "\n  sample $i: $sample";
     }
 
+    /** Run bin inference */
+    function a_bin(...$in) {
+        $v = $this->data($in, $cfg = cfg('gpt'));
+        if (!$v->bin)
+            return $this->a_u();
+        [$v->settings, $state_dict] = GPT_Bin::load($v->bin);
+        $v->txt = $v->settings['dataset'];
+        $v->rnd && mt_srand($v->rnd);
+        $gpt = new GPT_Run($v->settings);
+        $gpt->params = $state_dict;
+        $docs = $gpt->build_vocab($v->txt);
+        
+        echo "num params: $gpt->n_params\n=============\n";
+        foreach ($v->settings as $key => $val)
+            echo "$key: $val\n";
+
+        shuffle($docs);
+        echo "INFERENCE:";
+        for (;1;) {
+            $p = trim(fgets(STDIN));
+            foreach ($gpt->inference($v->temperature, 1, $p) as $response)
+                echo " response: $p$response\n";
+        }
+    }
+
     /** Generate the datasets */
-    function a_g(...$in) {
+    function a_g(...$in) { // names datasets - https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt
         $v = $this->data($in, $cfg = cfg('data'));
         if (method_exists($gen = new GPT_Data, $type = $v->type)) {
-            $v->settings['filename'] = self::$d[1] . "/txt/" . $v->settings['filename'] . ".txt";
             $gen->$type($v->settings);
         } else echo strtr($cfg->usage, [
             '%list_1%' => var_export($cfg->short, true),
@@ -74,7 +97,6 @@ class app extends \Console
     /** See Logos usage (how run the model) */
     function a_u() {
         $cfg = cfg('gpt');
-        $gpt = new GPT_Run($cfg->default);
         echo strtr($cfg->usage, [
             '%list_1%' => var_export($cfg->short, true),
             '%list_2%' => var_export($cfg->default, true),

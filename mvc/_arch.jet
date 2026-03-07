@@ -1,0 +1,195 @@
+    // Главная функция запуска
+    function startTraining() {
+        const steps = document.getElementById('input_steps').value;
+        const lr = document.getElementById('input_lr').value;
+        
+        // Очистка графика перед новым запуском
+        lossChart.data.labels = [];
+        lossChart.data.datasets[0].data = [];
+        lossChart.update();
+
+        btnStart.disabled = true;
+        statusText.innerText = "Training...";
+
+        // 1. Запускаем обучение (AJAX)
+        fetch('ajax.php', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ action: 'train', steps: steps, lr: lr })
+        }).then(response => response.json())
+          .then(data => {
+              console.log("Training started", data);
+              // Запускаем поллинг прогресса
+              pollProgress();
+          });
+    }
+
+    // 2. Поллинг (опрос) состояния
+    function pollProgress() {
+        fetch('ajax.php', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ action: 'get_progress' })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'running') {
+                addDataPoint(data.step, data.loss);
+                statusText.innerText = `Step ${data.step} | Loss ${data.loss}`;
+                
+                // Спрашиваем снова через 1 секунду
+                setTimeout(pollProgress, 1000);
+            } else if (data.status === 'done') {
+                addDataPoint(data.step, data.loss);
+                statusText.innerText = "Finished!";
+                btnStart.disabled = false;
+            } else {
+                statusText.innerText = "Error or Stopped";
+                btnStart.disabled = false;
+            }
+        });
+    }
+===============================================================================
+
+#doc_div pre, #doc_div code {
+    background-color: #eee;
+}
+#doc_div pre {
+    padding: 10px;
+}
+#doc_div a {
+    text-decoration: underline;
+    color:blue;
+    border-bottom: 1px solid blue;
+}
+#doc_div a:hover {
+    text-decoration: none;
+    background:blue;
+    color:#fff;
+}
+#sand-pre a:hover, a[active] {
+    background:#818cf8;
+    color:#fff;
+}
+#sand-pre a {
+    display:inline-block;
+    padding: 0 10px;
+    line-height: 27px;
+}
+#pre-form textarea {
+    width:88%;
+    background-color:#ffe;
+    padding: 10px;
+}
+#sand-pre {
+    width:calc(100% - 450px);
+}
+.pre-set:hover {
+    background-color:#e0e7ff;
+}
+.pre-set pre {
+    margin:7px;
+}
+.pre-set {
+    display:inline-block;
+    vertical-align:top;
+    border-right: 1px solid blue;
+    border-bottom: 1px solid blue;
+    cursor:default;
+}
+.act-part {
+    border-bottom: 3px solid #4338ca !important;
+}
+
+
+
+
+
+sky.d.doc_save = function() {
+    $('input[name=title]').val($('input[name=xname]').val());
+    ajax('save', $('#doc_save').serialize(), function(r) {
+        r.jump ? (location.href = r.jump) : $('#doc_div').html(r)
+    });
+};
+sky.d.doc_edit = function(a) {
+    ajax('edit', {add:a || 0}, function(r) {
+        location.href = r;
+    });
+};
+
+sky.d.pn = [2,0];
+sky.d.panel = function(n, from_preset) {
+    n = sky.d.pn[0] = 3 == n ? (2 == sky.d.pn[0] ? 0 : 1 + sky.d.pn[0]) : n;
+    $('.bg-wx .fs16').removeClass('act-part');
+    $('.bg-wx .fs16:eq(' + n + ')').addClass('act-part', 1);
+    $('#pre-form').prev().css({display: !n ? '' : 'none'})
+        .next().css({display: 1==n ? 'inline-flex' : 'none'})
+        .next().css({display: 2==n ? '' : 'none'});
+    if (1 == n) {
+        let el = $('#pre-form textarea:eq(0)').focus();
+        if (from_preset)
+            setTimeout(() => {
+                el[0].selectionStart = el[0].selectionEnd = sky.d.pos = 0;
+            });
+    }
+};
+sky.d.preset = function(el) {
+    el = el || $('#sand-pre a:eq(0)')
+    ajax('preset', {n: '{{$sky->_2}}-' + el.html()}, function(r) {
+        $('#sand-pre a').removeAttr('active');
+        el.attr('active', 1);
+        $('#pre-form').next().html(r);
+        $('.pre-set').click(function() {
+            sky.d.panel(1, 1)
+            sky.d.pn[1] = $(this).attr('n');
+            $('#pre-form textarea').val($(this).children().text()).focus();
+        });
+        sky.d.panel(2)
+    });
+};
+sky.d.pre_save = function(add) {
+    ajax('pre_save', {f:add + sky.d.pn[1], s:$('#pre-form textarea').val()}, function(r) {
+        //$('#doc_div').html(r)
+    });
+};
+sky.d.pre_run = function(pos) {
+    var chk = $('#v-body input[type=checkbox]').is(':checked') == true ? 1 : 0,
+        s = $('#pre-form textarea').val();
+    if ('jsc' == '{{$sky->_2}}') {
+        let js_run = function(__code) {
+            var out = '';
+            try { eval(__code); } catch(e) { out = e; }
+            $('#pre-form').prev().html('<pre>1</pre><hr><pre>2</pre>')
+                .children('pre:eq(0)').text(__code).next().next().text(out);
+            //$('#pre-form').prev().html('<pre>' +  + "<hr>" + out + '</pre>');
+        };
+        sky.d.panel(0);
+        return js_run(s)
+    }
+    pos = pos || sky.d.pos
+    ajax('{{$sky->_2}}_run', {s:s, chk:chk, pos:pos, db:'{{$sky->_4?:'main::core'}}'}, function(r) {
+        sky.d.panel(0);
+        $('#pre-form').prev().html('<pre>' + r + '</pre>');
+    });
+};
+sky.d.iview = function(n) {
+    $('#v-body h2:eq(' + n + ')').get(0).scrollIntoView({block:'center',behavior:'smooth'});
+};
+sky.d.pos = 0;
+sky.d.cp = function(el) {
+    sky.d.pos = el.selectionStart
+    //let v = $(el).val(), c = v.substr(0, sky.d.pos).replace(/[^\n]/g, '');
+    //$('#xtt').html(' <b>line</b>: ' + sky.d.pos + v.split(/\n/g)[c.length])
+};
+sky.d.open = function(el, id) {
+    $('a.inner-menu').removeAttr('active');
+    $(el).attr('active', 1);
+    ajax('{{$sky->_1}}&id=' + id, function(r) {
+        $('#dev-earth').html(r.html);
+        $('#top-head h3').html(r.h3);
+    });
+};
+
+
+
+

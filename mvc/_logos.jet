@@ -1,6 +1,150 @@
 #.jet
 
-#.ware //////////////////////////////////////////////////////////////////////////////
+#.run //////////////////////////////////////////////////////////////////////////////
+#use(.menu)
+#use(.run_m)
+#use(`GPT` as header)
+<div style="width:calc(100%)">
+<div class="bg-wx bg-x" style="position:sticky; top:0px">
+    <div class="fs16" onclick="sky.d.panel(0)" style="width:70px;line-height:37px">Charts</div>
+    <div class="fs16" onclick="sky.d.panel(1)" style="width:115px;line-height:37px">Lab Window</div>
+    <div class="fs16" onclick="sky.d.panel(2)" style="width:70px;line-height:37px">Presets:</div>
+    <div id="sand-pre">{!$list!}</div>
+    <div style="width:260px">
+        <button class="Esc" onclick="sky.d.panel(3)">next - Esc</button> &nbsp;
+        <button class="f2" onclick="sky.d.pre_save('')">save - F2</button> &nbsp;
+        <button onclick="sky.g.run()">run - F9</button>
+    </div>
+</div>
+<div style="padding:10px">
+    <div class="chart" style="background:#fff;"><canvas id="loss"></canvas></div>
+    <form id="settings" style="float:right; margin-right:50px">{!$form!}</form>
+    <div class="chart" style="background:#eee;"><canvas id="speed"></canvas></div>
+</div>
+<div id="pre-form" style="padding:10px">
+    ???
+<div>
+    <br>&nbsp; <button onclick="sky.d.pre_save('+')">add new</button>
+</div>
+</div>
+<div></div>
+</div>
+#.run.run_m @use(.header)
+<a href="_logos?run=train" class="inner-menu"@active('train' == $sky->_2)>Training</a>
+<a href="_logos?run=infer" class="inner-menu"@active('infer' == $sky->_2)>Inference</a>
+#.run_m
 
-#.ware
+#.preset
+@loop($ary as $v)
+<div class="pre-set" n="{{$_.'.'.$fn}}">
+    <pre>{{$v}}</pre>
+</div>
+~loop
+#.preset
 
+#.gen //////////////////////////////////////////////////////////////////////////////
+#use(.menu)
+#use(.gen_m)
+#.gen.gen_m
+<a href="_logos?gen=g1" class="inner-menu"@active('g1' == $sky->_2)>Test1</a>
+<a href="_logos?gen=g2" class="inner-menu"@active('g2' == $sky->_2)>Test2</a>
+#.gen_m
+
+#.data //////////////////////////////////////////////////////////////////////////////
+#use(.menu)
+#use(.data_m)
+#.data.data_m
+<a href="_logos?data=g1" class="inner-menu"@active('g1' == $sky->_2)>Convert quantization</a>
+<a href="_logos?data=g2" class="inner-menu"@active('g2' == $sky->_2)>See the model</a>
+#.data_m
+
+#.menu ------------------------------------------------------------------------------
+<br>
+<div class="other-task" style="position:sticky; top:50px" title="{{SKY::$plans['logos']['app']['path']}}">Logos</div>
+<a href="_logos?run=train"@active('run' == $sky->_1)>Run GPT</a>@block(`` as run_m)
+<a href="_logos?gen="@active('gen' == $sky->_1)>Generate Dataset</a>@block(`` as gen_m)
+<a href="_logos?data="@active('data' == $sky->_1)>Browse Data</a>@block(`` as data_m)
+<style>@inc(chart.css)</style>
+<script>
+sky.d.pn = [2,0];
+sky.d.panel = function(n, from_preset) {
+    n = sky.d.pn[0] = 3 == n ? (2 == sky.d.pn[0] ? 0 : 1 + sky.d.pn[0]) : n;
+    $('.bg-wx .fs16').removeClass('act-part');
+    $('.bg-wx .fs16:eq(' + n + ')').addClass('act-part', 1);
+    $('#pre-form').prev().css({display: !n ? '' : 'none'})
+        .next().css({display: 1==n ? 'inline-flex' : 'none'})
+        .next().css({display: 2==n ? '' : 'none'});
+    if (1 == n) {
+        let el = $('#pre-form textarea:eq(0)').focus();
+        if (from_preset)
+            setTimeout(() => {
+                el[0].selectionStart = el[0].selectionEnd = sky.d.pos = 0;
+            });
+    }
+};
+sky.d.preset = function(el) {
+    el = el || $('#sand-pre a:eq(0)')
+    ajax('preset', {n: '{{$sky->_2}}-' + el.html()}, function(r) {
+        $('#sand-pre a').removeAttr('active');
+        el.attr('active', 1);
+        $('#pre-form').next().html(r);
+        $('.pre-set').click(function() {
+            sky.d.panel(1, 1)
+            sky.d.pn[1] = $(this).attr('n');
+            $('#pre-form textarea').val($(this).children().text()).focus();
+        });
+        sky.d.panel(0)
+    });
+};
+sky.g.run_v = 0;
+sky.g.run = function() {
+  var d0 = chart[0].data, d1 = chart[1].data;
+  if (sky.g.run_v = 1 - sky.g.run_v) {
+    d0.datasets[0].data = [];
+    d0.labels = [];
+    d1.datasets[0].data = [];
+    d1.labels = [];
+    ajax('run', $('#settings').serialize(), (r) => {sky.g.run_v = 0});
+  }
+  var progress = function() {
+    setTimeout(function () {
+      ajax('progress', {run:sky.g.run_v}, function(r) {
+        for (let step in r.losses) {
+          d0.labels.push(step);
+          d0.datasets[0].data.push(r.losses[step]);
+        }
+        chart[1].update();
+        if (r.n_doc) {
+          d1.labels.push(r.n_doc);
+          d1.datasets[0].data.push(r.speed);
+          chart[0].update();
+        }
+        r.stop || progress();
+      });
+    }, 1000);
+  };
+  sky.g.run_v && progress();
+};
+
+var chart = [];
+$(function() {
+    @inc(chart.init)
+    if (sky.a._1 == 'run') {
+        sky.d.preset()
+
+        sky.key['Escape'] = function() { // Escape
+            sky.d.panel(3);
+        };
+        sky.key[27] = function() { // Escape
+            sky.d.panel(3);
+        };
+        sky.key[120] = function() { // F9
+            sky.g.run();
+        };
+    }
+    sky.key[113] = function() { // F2
+        $('.f2:first').click();
+    };
+});
+</script>
+#.menu

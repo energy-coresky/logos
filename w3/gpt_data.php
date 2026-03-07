@@ -18,7 +18,21 @@ class GPT_Data /* datasets generation */
             }
         }
         
-        $this->_save($filename, $dataset);
+        $this->_save($name, $dataset);
+    }
+
+    function math7() {
+        $dataset = [];
+        for ($a = 0; $a <= 7; $a++) {
+            for ($b = 0; $b <= 7; $b++) {
+                $sum = $a + $b;
+                if ($sum <= 7) {
+                    $line = "{$a}+{$b}={$sum}\n";
+                    $dataset[] = $line;
+                }
+            }
+        }
+        $this->_save('math7', $dataset);
     }
 
     function dna(array $settings) {
@@ -44,12 +58,12 @@ class GPT_Data /* datasets generation */
             }
         }
         
-        $this->_save($filename, $dataset);
+        $this->_save($name, $dataset);
     }
 
-    protected function _save(string $filename, array $dataset) {
+    protected function _save(string $name, array $dataset) {
         shuffle($dataset);
-        file_put_contents($filename, implode('', $dataset));
+        Plan::txt_p("$name.txt", implode('', $dataset));
         echo "Готово! Сгенерировано " . count($dataset) . " примеров.\n";
         echo "Примеры строк:\n";
         echo implode('', array_slice($dataset, 0, 5));
