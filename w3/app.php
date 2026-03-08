@@ -21,10 +21,10 @@ class app extends \Console
     }
 
     /** Run train &| inference */
-    function a_z(...$in) {
+    function a_run(...$in) {
         $v = $this->data($in, $cfg = cfg('gpt'));
         if (!$v->txt && !$v->bin)
-            return $this->a_u();
+            return $this->a_usage();
         $time = time();
         if ($load_bin = !$v->qtz && $v->bin) {
             [$v->settings, $state_dict] = GPT_Bin::load($v->bin);
@@ -62,7 +62,7 @@ class app extends \Console
     function a_chat(...$in) {
         $v = $this->data($in, $cfg = cfg('gpt'));
         if (!$v->bin)
-            return $this->a_u();
+            return $this->a_usage();
         [$v->settings, $params] = GPT_Bin::load($v->bin);
         $v->rnd && mt_srand($v->rnd);
         $gpt = new GPT_Run($v->settings, $params);
@@ -82,7 +82,7 @@ class app extends \Console
     }
 
     /** Generate the datasets */
-    function a_g(...$in) { // names datasets - https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt
+    function a_gen(...$in) { // names datasets - https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt
         $v = $this->data($in, $cfg = cfg('data'));
         if (method_exists($gen = new GPT_Data, $type = $v->type)) {
             $gen->$type($v->settings);
@@ -93,7 +93,7 @@ class app extends \Console
     }
 
     /** See Logos usage (how run the model) */
-    function a_u() {
+    function a_usage() {
         $cfg = cfg('gpt');
         echo strtr($cfg->usage, [
             '%list_1%' => var_export($cfg->short, true),

@@ -2,7 +2,7 @@
 
 class GPT_Run extends GPT_Engine
 {
-    function __construct(array $prop = [], array $params = [])
+    function __construct(array $prop = [], array $params = [], array $adam = [])
     {
         ini_set('memory_limit', '1G');
         foreach ($prop as $k => $v)
@@ -74,13 +74,12 @@ class GPT_Run extends GPT_Engine
             $this->params["pre_att_{$i}"] = array_fill(0, $this->n_embd, 1.0); # params for rmsnorn
             $this->params["pre_mlp_{$i}"] = array_fill(0, $this->n_embd, 1.0); # params for rmsnorn
         }
-
-        $this->grads = $this->params;
         $this->m = $this->v = array_fill(0, $this->n_params, 0.0);
     }
 
     function train(array $docs, int $n_steps): Generator {
         $this->init_weights();
+        $this->grads = $this->params;
         $n_docs = count($docs);
         $i_docs = 0;
         $min_lr = $this->learning_rate * 0.1;// $min_lr обычно ставят 10% от $this->learning_rate или 1e-5
@@ -198,7 +197,7 @@ class GPT_Run extends GPT_Engine
             foreach ($tokens as $token_id)
                 $logits = $this->gpt($token_id, $pos_id++, $keys, $values);
 
-            for ($out = ''; $pos_id < $this->block_size;) {
+            for ($out = ''; $pos_id < $this->block_size; ) {
                 $weights = $this->softmax(array_map(fn($l) => $l / $temperature, $logits));
                 $token_id = $this->random_choices(range(0, $this->vocab_size - 1), $weights);
                 if ($token_id == $this->BOS)
