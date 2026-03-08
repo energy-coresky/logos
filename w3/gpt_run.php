@@ -2,13 +2,14 @@
 
 class GPT_Run extends GPT_Engine
 {
-    function __construct(array $prop = [])
+    function __construct(array $prop = [], array $params = [])
     {
         ini_set('memory_limit', '1G');
         foreach ($prop as $k => $v)
             $this->$k = $v;
         $this->head_dim = intval($this->n_embd / $this->n_head);
         $this->scale_head = 1.0 / sqrt($this->head_dim);
+        $this->params = $params;
     }
 
     function build_vocab(string $name): array
@@ -23,7 +24,6 @@ class GPT_Run extends GPT_Engine
         $this->n_params = $this->n_embd * (
             1 + $this->block_size +
             2 * ($this->n_layer + $this->vocab_size) +
-//           $this->block_size + 2 * $this->vocab_size +
             12 * $this->n_layer * $this->n_embd
         );
         $this->itos = $this->stoi = [];
@@ -84,7 +84,7 @@ class GPT_Run extends GPT_Engine
         $n_docs = count($docs);
         $i_docs = 0;
         $min_lr = $this->learning_rate * 0.1;// $min_lr обычно ставят 10% от $this->learning_rate или 1e-5
-        $warmup_steps = 200;// Warmup на первые 200 шагов
+        $warmup_steps = 200;
         for ($step = 0; $step < $n_steps; ) {
             array_walk_recursive($this->grads, fn(&$v) => $v = 0.0);
             $batch_loss = 0.0;
@@ -185,81 +185,27 @@ class GPT_Run extends GPT_Engine
         return $loss / $n;
     }
 
-    function __inference(float $temperature = 0.6, int $count = 10): Generator {
+    function inference(float $temperature = 0.6, int $count = 10, string $prompt = ''): Generator {
+        $tokens = [$this->BOS];
+        foreach (str_split($prompt) as $char) {
+            if (isset($this->stoi[$char]))
+                $tokens[] = $this->stoi[$char];
+        }
+
         for ($i = 0; $i < $count; ) {
             $keys = $values = array_fill(0, $this->n_layer, []);
-            $token_id = $this->BOS;
-            $out = '';
-            for ($pos_id = 0; $pos_id < $this->block_size; $pos_id++) {
-                $logits = $this->gpt($token_id, $pos_id, $keys, $values);
-                
-                // Apply temperature
-                $scaled_logits = array_map(fn($l) => $l / $temperature, $logits);
-                $weights = $this->softmax($scaled_logits);
-                
+            $pos_id = 0;
+            foreach ($tokens as $token_id)
+                $logits = $this->gpt($token_id, $pos_id++, $keys, $values);
+
+            for ($out = ''; $pos_id < $this->block_size;) {
+                $weights = $this->softmax(array_map(fn($l) => $l / $temperature, $logits));
                 $token_id = $this->random_choices(range(0, $this->vocab_size - 1), $weights);
                 if ($token_id == $this->BOS)
                     break;
                 $out .= $this->itos[$token_id];
+                $logits = $this->gpt($token_id, $pos_id++, $keys, $values);
             }
-            yield ++$i => $out;
-        }
-    }
-    function inference(float $temperature = 0.6, int $count = 10, string $prompt = ''): Generator {
-        // 1. Токенизация промпта
-        $prompt_tokens = [];
-        // Разбиваем строку на символы и преобразуем в ID
-        foreach (str_split($prompt) as $char) {
-            if (isset($this->stoi[$char])) {
-                $prompt_tokens[] = $this->stoi[$char];
-            }
-        }
-
-        for ($i = 0; $i < $count; ) {
-            $keys = $values = array_fill(0, $this->n_layer, []);
-            $out = '';
-            
-            // 2. Обработка BOS (начало последовательности)
-            // Модель ожидает BOS в начале, как при обучении
-            $token_id = $this->BOS;
-            // Получаем логиты для позиции 0. Они предсказывают первый токен.
-            $logits = $this->gpt($token_id, 0, $keys, $values);
-            
-            // Текущая позиция в последовательности (0 уже занят BOS)
-            $current_pos = 1;
-
-            // 3. Prefill: "Скармливаем" промпт модели
-            // Мы проходим по токенам промпта и обновляем KV-кэш, 
-            // но не выводим результат, а просто запоминаем предсказание для следующего шага.
-            foreach ($prompt_tokens as $p_token) {
-                // Подаем токен промпта на вход
-                $logits = $this->gpt($p_token, $current_pos, $keys, $values);
-                $current_pos++;
-            }
-            
-            // Теперь $logits содержит вероятности для ПЕРВОГО токена ответа
-            // $current_pos указывает на позицию этого токена.
-
-            // 4. Generation: Генерация ответа
-            // Начинаем цикл с текущей позиции до конца block_size
-            for ($pos_id = $current_pos; $pos_id < $this->block_size; $pos_id++) {
-                // Apply temperature
-                $scaled_logits = array_map(fn($l) => $l / $temperature, $logits);
-                $weights = $this->softmax($scaled_logits);
-                
-                $token_id = $this->random_choices(range(0, $this->vocab_size - 1), $weights);
-                
-                // Если встретили BOS или перенос строки (обычно конец примера в датасете) - останавливаемся
-                if ($token_id == $this->BOS || ($this->itos[$token_id] ?? '') === "\n") {
-                    break;
-                }
-                
-                $out .= $this->itos[$token_id];
-                
-                // Генерируем логиты для следующего шага
-                $logits = $this->gpt($token_id, $pos_id, $keys, $values);
-            }
-            
             yield ++$i => $out;
         }
     }

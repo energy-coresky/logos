@@ -58,17 +58,15 @@ class app extends \Console
             echo "\n  sample $i: $sample";
     }
 
-    /** Run bin inference */
-    function a_bin(...$in) {
+    /** Run bin-file inference as chat */
+    function a_chat(...$in) {
         $v = $this->data($in, $cfg = cfg('gpt'));
         if (!$v->bin)
             return $this->a_u();
-        [$v->settings, $state_dict] = GPT_Bin::load($v->bin);
-        $v->txt = $v->settings['dataset'];
+        [$v->settings, $params] = GPT_Bin::load($v->bin);
         $v->rnd && mt_srand($v->rnd);
-        $gpt = new GPT_Run($v->settings);
-        $gpt->params = $state_dict;
-        $docs = $gpt->build_vocab($v->txt);
+        $gpt = new GPT_Run($v->settings, $params);
+        $docs = $gpt->build_vocab($v->settings['dataset']);
         
         echo "num params: $gpt->n_params\n=============\n";
         foreach ($v->settings as $key => $val)
@@ -78,7 +76,7 @@ class app extends \Console
         echo "INFERENCE:";
         for (;1;) {
             $p = trim(fgets(STDIN));
-            foreach ($gpt->inference($v->temperature, 1, $p) as $response)
+            foreach ($gpt->inference($v->temperature, 3, $p) as $response)
                 echo " response: $p$response\n";
         }
     }
