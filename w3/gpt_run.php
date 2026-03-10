@@ -21,42 +21,47 @@ class GPT_Run extends GPT_Engine
         sort($unique_chars);
         $chars = array_merge(['<BOS>'], $unique_chars);
         $this->vocab_size = count($chars);
-        $this->n_params = $this->n_embd * (
-            1 + $this->block_size +
-            2 * ($this->n_layer + $this->vocab_size) +
-            12 * $this->n_layer * $this->n_embd
-        );
         $this->itos = $this->stoi = [];
         foreach ($chars as $i => $ch) {
             $this->stoi[$ch] = $i;
             $this->itos[$i] = $ch;
         }
         $this->BOS = $this->stoi['<BOS>'];
+        $this->n_params = $this->n_embd * (
+            1 + $this->block_size +
+            2 * ($this->n_layer + $this->vocab_size) +
+            12 * $this->n_layer * $this->n_embd
+        );
         return $docs;
     }
 
-    function init_weights(): void {
-        $matrix = function ($nout, $nin, $std = 0.02) {
-            // Box-Muller transform
-            $gauss = function ($mean = 0, $std = 1) {
-                static $spare = null;
-                static $has_spare = false;
-                if ($has_spare) {
-                    $has_spare = false;
-                    return $spare * $std + $mean;
-                }
-                $u = mt_rand() / mt_getrandmax(); $v = mt_rand() / mt_getrandmax();
-                $u = $u < 1e-10 ? 1e-10 : $u;
-                $mag = $std * sqrt(-2.0 * log($u));
-                $spare = $mag * sin(2.0 * pi() * $v); $has_spare = true;
-                return $mag * cos(2.0 * pi() * $v) + $mean;
-            };
-            for ($i = 0; $i < $nout; $i++)
-                for ($j = 0; $j < $nin; $j++)
-                    $ary[$i][$j] = $gauss(0, $std);
+    // Box-Muller transform
+    function gauss($mean = 0, $std = 1): void {
+        static $spare = null;
+        static $has_spare = false;
+        if ($has_spare) {
+            $has_spare = false;
+            return $spare * $std + $mean;
+        }
+        $u = mt_rand() / mt_getrandmax();
+        $v = mt_rand() / mt_getrandmax();
+        $u = $u < 1e-10 ? 1e-10 : $u;
+        $mag = $std * sqrt(-2.0 * log($u));
+        $spare = $mag * sin(2.0 * pi() * $v);
+        $has_spare = true;
+        return $mag * cos(2.0 * pi() * $v) + $mean;
+    }
+
+    function init_weights($name = false): void {
+        if ($name) {
+            
+        }
+        $matrix = function ($rows, $cols, $std = 0.02) {
+            for ($i = 0; $i < $rows; $i++)
+                for ($j = 0; $j < $cols; $j++)
+                    $ary[$i][$j] = $this->gauss(0, $std);
             return $ary;
         };
-
         $this->params = [
             'wte' => $matrix($this->vocab_size, $this->n_embd),
             'wpe' => $matrix($this->block_size, $this->n_embd),
@@ -145,7 +150,7 @@ class GPT_Run extends GPT_Engine
         }
     }
 
-    function train_one_doc(array $tokens): float {
+    private function train_one_doc(array $tokens): float {
         $n = min($this->block_size, count($tokens) - 1);
         $this->cache = $probs_all = [];
         $keys = $values = array_fill(0, $this->n_layer, []);

@@ -162,11 +162,9 @@ class GPT_Engine
 
         $relu_cache = $this->cache["relu_{$li}_{$pos_id}"];
         $d_fc1_out = [];
-        for ($i = 0, $cnt = count($d_h); $i < $cnt; $i++) {
-            // ✅ ИСПРАВЛЕНИЕ: производная ReLU = 1 если x>0, иначе 0
-            //    relu_cache содержит x ДО активации
-            $d_fc1_out[$i] = $d_h[$i] * ($relu_cache[$i] > 0 ? 1.0 : 0.0);
-        }
+        // ✅ ИСПРАВЛЕНИЕ: производная ReLU = 1 если x>0, иначе 0 relu_cache содержит x ДО активации
+        for ($i = 0, $cnt = count($d_h); $i < $cnt; $i++)
+            $d_fc1_out[$i] = $relu_cache[$i] > 0 ? $d_h[$i] : 0.0;
 
         $this->accumulate_grad("layer{$li}.mlp_fc1", $d_fc1_out, $this->cache["x_norm_mlp_{$li}_{$pos_id}"]);
         $d_x_norm_mlp   = $this->backward_linear_input($d_fc1_out, $this->params["layer{$li}.mlp_fc1"]);
@@ -184,15 +182,11 @@ class GPT_Engine
         $d_q_total          = array_fill(0, $this->n_embd, 0.0);
         $attn_weights_cache = $this->cache["attn_w_{$li}_{$pos_id}"];
         $limit              = count($attn_weights_cache[0]);
-
         // ✅ ИСПРАВЛЕНИЕ: накапливаем градиенты по входу x для wk и wv
         //    по ВСЕМ временным шагам t, а не только по последнему
-        $d_x_k_accum = array_fill(0, $this->n_embd, 0.0);
-        $d_x_v_accum = array_fill(0, $this->n_embd, 0.0);
+        $d_x_k_accum = $d_x_v_accum = $d_q_total; # same 0.0 vector
 
         // Сначала вычислим d_scores для всех голов и всех t (нужны ниже)
-        $d_scores_all = []; // [head][t]
-
         for ($h = 0; $h < $this->n_head; $h++) {
             $hs         = $h * $this->head_dim;
             $d_head_out = array_slice($d_attn_ctx, $hs, $this->head_dim);
@@ -210,12 +204,9 @@ class GPT_Engine
             $sum_p_ds = 0.0;
             for ($t = 0; $t < $limit; $t++)
                 $sum_p_ds += $attn_w[$t] * $d_attn_logits[$t];
-
             $d_scores = [];
             for ($t = 0; $t < $limit; $t++)
                 $d_scores[$t] = $attn_w[$t] * ($d_attn_logits[$t] - $sum_p_ds);
-
-            $d_scores_all[$h] = $d_scores;
 
             $q_curr = array_slice($this->cache["q_{$li}_{$pos_id}"], $hs, $this->head_dim);
 

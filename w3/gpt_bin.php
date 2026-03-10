@@ -6,13 +6,13 @@ class GPT_Bin
     const Q_INT8 = 2; // 1 байт на вес
     const Q_INT4 = 3; // 0.5 байта на вес
 
-    public static function save($name, $state_dict, $settings, $qtz): void
+    public static function save($name, $params, $settings, $qtz): void
     {
         $len = strlen($json = json_encode($settings));
         $header = pack('a4CV', 'GPT1', 2, $len);
-        $header .= $json . pack('CV', (int)$qtz, count($state_dict));
+        $header .= $json . pack('CV', (int)$qtz, count($params));
         $blob = '';
-        foreach ($state_dict as $layerName => $weights) {
+        foreach ($params as $layerName => $weights) {
             $flatWeights = self::flatten($weights);
             $shape = self::getShape($weights);
             $header .= pack('S', strlen($layerName)) . $layerName;
@@ -48,14 +48,14 @@ class GPT_Bin
             $offset += 4 * $meta['dims_count'];
             $meta = unpack('Ldata_len', $bin, $offset);
             $offset += 4;
-            $state_dict[$layerName] = [array_values($shape), $meta['data_len']];
+            $params[$layerName] = [array_values($shape), $meta['data_len']];
         }
-        foreach ($state_dict as &$v) {
+        foreach ($params as &$v) {
             [$shape, $len] = $v;
             $v = self::dequantize(substr($bin, $offset, $len), $shape, $header['quantization']);
             $offset += $len;
         }
-        return [json_decode($json, true), $state_dict];
+        return [json_decode($json, true), $params];
     }
 
     private static function quantize(array $weights, int $type): string

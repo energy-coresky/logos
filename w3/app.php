@@ -43,7 +43,7 @@ class app extends \Console
             echo "$key: $val\n";
 
         if (!$load_bin) {
-            echo "TRAIN:\n";
+            echo "TRAIN:\n"; # math7 Theoretical Loss=0.597
             foreach ($gpt->train($docs, $v->n_train, $v->learning_rate) as $i => $loss)
                 echo "\r  step $i | loss $loss | seconds " . (time() - $time) . '     ';
             if ($v->qtz) {
