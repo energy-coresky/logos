@@ -25,16 +25,11 @@ class app extends \Console
         $v = $this->data($in, $cfg = cfg('gpt'));
         if (!$v->txt && !$v->bin)
             return $this->a_usage();
-        $time = time();
-        if ($load_bin = !$v->qtz && $v->bin) {
-            [$v->settings, $state_dict] = GPT_Bin::load($v->bin);
-            $v->txt = $v->settings['dataset'];
-        }
         $v->rnd && mt_srand($v->rnd);
-        $gpt = new GPT_Run($v->settings);
-        if ($load_bin)
-            $gpt->params = $state_dict;
-        $docs = $gpt->build_vocab($v->txt);
+        $time = time();
+        $main = 
+        $gpt = new GPT($main, $v->bin);
+        $docs = $gpt->build_vocab();
         
         echo "num docs: " . count($docs) . "\n";
         echo "vocab size: $gpt->vocab_size\n";
@@ -42,9 +37,10 @@ class app extends \Console
         foreach ($v->settings as $key => $val)
             echo "$key: $val\n";
 
-        if (!$load_bin) {
+        if ($v->train) {
             echo "TRAIN:\n"; # math7 Theoretical Loss=0.597
-            foreach ($gpt->train($docs, $v->n_train, $v->learning_rate) as $i => $loss)
+            $train = 
+            foreach ($gpt->train($docs, $train, $v->qtz) as $i => $loss)
                 echo "\r  step $i | loss $loss | seconds " . (time() - $time) . '     ';
             if ($v->qtz) {
                 $qtz = $v->qtz == 4 ? GPT_Bin::Q_INT4 : ($v->qtz == 8 ? GPT_Bin::Q_INT8 : GPT_Bin::Q_FP32);

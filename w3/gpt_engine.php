@@ -8,6 +8,7 @@ class GPT_Engine
     public int $n_layer = 2;
     public int $block_size = 8;
     public int $head_dim;
+    public string $dataset;
 
     // Model State
     public array $params = [];
@@ -18,13 +19,6 @@ class GPT_Engine
     // Optimizer State (Adam)
     protected array $m = [];
     protected array $v = [];
-
-    public float $beta1 = 0.9;
-    public float $beta2 = 0.95;
-    public float $eps_adam = 1e-8;
-    public float $grad_clip = 1.0; // Максимальное значение градиента
-    public float $learning_rate = 1e-4;
-    public int $batch_size = 36;
 
     // Tokenizer
     protected array $stoi = [];

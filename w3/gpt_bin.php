@@ -2,14 +2,13 @@
 
 class GPT_Bin
 {
-    const Q_FP32 = 1; // 4 байта на вес
-    const Q_INT8 = 2; // 1 байт на вес
-    const Q_INT4 = 3; // 0.5 байта на вес
+    const Q_FP32 = 32; // 4 байта на вес
+    const Q_INT8 = 8; // 1 байт на вес
+    const Q_INT4 = 4; // 0.5 байта на вес
 
-    public static function save($name, $params, $settings, $qtz): void
-    {
+    public static function save($name, $params, $qtz, $settings) {
         $len = strlen($json = json_encode($settings));
-        $header = pack('a4CV', 'GPT1', 2, $len);
+        $header = pack('a4CV', 'GPT2', 2, $len);
         $header .= $json . pack('CV', (int)$qtz, count($params));
         $blob = '';
         foreach ($params as $layerName => $weights) {
@@ -26,16 +25,13 @@ class GPT_Bin
         Plan::bin_p("$name.bin", $header . $blob);
     }
 
-    public static function load(string $name): ?array
-    {
-        $header = unpack('a4magic/Cversion/Vmeta_len', $bin = Plan::bin_g("$name.bin"), 0);
-        if ($header['magic'] !== 'GPT1')
+    public static function load(string $name, &$params, &$v = null) {
+        $header = unpack('a4magic/Cversion/Vlen', $bin = Plan::bin_g("$name.bin"), 0);
+        if ($header['magic'] !== 'GPT2')
             throw new Error('Error in file format');
-        $json = substr($bin, 9, $header['meta_len']);
-        $offset = 9 + $header['meta_len'];
-        $header = unpack('Cquantization/Vlayer_count', $bin, $offset);
+        $layers = unpack('Cquantization/Vcount', $bin, $offset = 9 + $header['len']);
         $offset += 5;
-        for ($i = 0; $i < $header['layer_count']; $i++) {
+        for ($i = 0; $i < $layers['count']; $i++) {
             $meta = unpack('Sname_len', $bin, $offset);
             $offset += 2;
             $layerName = substr($bin, $offset, $meta['name_len']);
@@ -50,12 +46,13 @@ class GPT_Bin
             $offset += 4;
             $params[$layerName] = [array_values($shape), $meta['data_len']];
         }
-        foreach ($params as &$v) {
-            [$shape, $len] = $v;
-            $v = self::dequantize(substr($bin, $offset, $len), $shape, $header['quantization']);
+        foreach ($params as &$one) {
+            [$shape, $len] = $one;
+            $one = self::dequantize(substr($bin, $offset, $len), $shape, $layers['quantization']);
             $offset += $len;
         }
-        return [json_decode($json, true), $params];
+        $v === null or [$params, $v] = $params; # adam cache
+        return json_decode(substr($bin, 9, $header['len']), true);
     }
 
     private static function quantize(array $weights, int $type): string

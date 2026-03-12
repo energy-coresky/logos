@@ -1,20 +1,26 @@
 <?php
 
-class GPT_Run extends GPT_Engine
+class GPT extends GPT_Engine
 {
-    function __construct(array $prop = [], array $params = [], array $adam = [])
+    private $binary;
+
+    function __construct(&$main = null, $binary = '')
     {
         ini_set('memory_limit', '1G');
-        foreach ($prop as $k => $v)
+        if ('' !== $binary) {
+            $main = GPT_Bin::load($this->binary = $binary, $this->params);
+        } else {
+            $main += cfg('gpt')->main;
+        }
+        foreach ($main as $k => $v)
             $this->$k = $v;
         $this->head_dim = intval($this->n_embd / $this->n_head);
         $this->scale_head = 1.0 / sqrt($this->head_dim);
-        $this->params = $params;
     }
 
-    function build_vocab(string $name): array
+    function &build_vocab(): array
     {
-        $lines = array_map('trim', explode("\n", Plan::txt_g("$name.txt")));
+        $lines = array_map('trim', explode("\n", Plan::txt_g("$this->dataset.txt")));
         $docs = array_values(array_filter($lines, fn($l) => !empty($l)));
         shuffle($docs);
         $unique_chars = array_unique(str_split(implode('', $docs)));
@@ -52,16 +58,17 @@ class GPT_Run extends GPT_Engine
         return $mag * cos(2.0 * pi() * $v) + $mean;
     }
 
-    function init_weights($name = false): void {
-        if ($name) {
-            
-        }
+    function init_weights(): array {
+        if ($this->params)
+            return GPT_Bin::load("$this->binary.adam", $this->m, $this->v);
+
         $matrix = function ($rows, $cols, $std = 0.02) {
             for ($i = 0; $i < $rows; $i++)
                 for ($j = 0; $j < $cols; $j++)
                     $ary[$i][$j] = $this->gauss(0, $std);
             return $ary;
         };
+
         $this->params = [
             'wte' => $matrix($this->vocab_size, $this->n_embd),
             'wpe' => $matrix($this->block_size, $this->n_embd),
@@ -80,22 +87,22 @@ class GPT_Run extends GPT_Engine
             $this->params["pre_mlp_{$i}"] = array_fill(0, $this->n_embd, 1.0); # params for rmsnorn
         }
         $this->m = $this->v = array_fill(0, $this->n_params, 0.0);
+        return cfg('gpt')->train;
     }
 
-    function train(array $docs, int $n_steps): Generator {
-        $this->init_weights();
+    function train(array &$docs, $train = [], $qtz = 0): Generator {
+        $y = (object)($train + $this->init_weights());
         $this->grads = $this->params;
         $n_docs = count($docs);
         $i_docs = 0;
-        $min_lr = $this->learning_rate * 0.1;// $min_lr обычно ставят 10% от $this->learning_rate или 1e-5
-        $warmup_steps = 200;
-        for ($step = 0; $step < $n_steps; ) {
+        $min_lr = y->learning_rate * 0.1; // $min_lr обычно ставят 10% от y->learning_rate или 1e-5
+        for ($step =& $y->epoch_from; $step < $y->n_epoch; ) {
             array_walk_recursive($this->grads, fn(&$v) => $v = 0.0);
             $batch_loss = 0.0;
-            for ($b = 0; $b < $this->batch_size; $b++) {
+            for ($b = 0; $b < $y->batch_size; $b++) {
                 $tokens = str_split($docs[$i_docs++ % $n_docs]);
                 $tokens = array_merge([$this->BOS], array_map(fn($t) => $this->stoi[$t], $tokens), [$this->BOS]);
-                $batch_loss += $this->train_one_doc($tokens);
+                $batch_loss += $this->train_one_doc($tokens, $y->batch_size);
             }
             // --- Adam Optimizer Update ---
             $grad_norm = 0.0;
@@ -103,20 +110,20 @@ class GPT_Run extends GPT_Engine
                 $grad_norm += $p ** 2;
             });
             $grad_norm = sqrt($grad_norm);
-            $scale_clip = $grad_norm > $this->grad_clip ? $this->grad_clip / $grad_norm : 1.0;
+            $scale_clip = $grad_norm > $y->grad_clip ? $y->grad_clip / $grad_norm : 1.0;
             // Linear decay
-          # $lr_t = $this->learning_rate * (1 - $step / $n_steps);
+          # $lr_t = y->learning_rate * (1 - $step / $y->n_epoch);
             # Cosine decay
-            if ($step < $warmup_steps) {
-                $lr_t = $this->learning_rate * ($step / $warmup_steps);
+            if ($step < $y->warmup_epoch) {
+                $lr_t = y->learning_rate * ($step / $y->warmup_epoch);
             } else {
-                $decay_ratio = ($step - $warmup_steps) / ($n_steps - $warmup_steps);
+                $decay_ratio = ($step - $y->warmup_epoch) / ($y->n_epoch - $y->warmup_epoch);
                 $coeff = 0.5 * (1 + cos(pi() * $decay_ratio));
-                $lr_t = $min_lr + ($this->learning_rate - $min_lr) * $coeff;
+                $lr_t = $min_lr + (y->learning_rate - $min_lr) * $coeff;
             }
             // --- Adam Optimizer Update ---
-            $bias_correction1 = 1 - pow($this->beta1, $step + 1);
-            $bias_correction2 = 1 - pow($this->beta2, $step + 1);
+            $bias_correction1 = 1 - pow($y->beta1, $step + 1);
+            $bias_correction2 = 1 - pow($y->beta2, $step + 1);
             $idx = 0;
             foreach ($this->params as $name => &$p) {
                 $grads_block =& $this->grads[$name];
@@ -128,29 +135,47 @@ class GPT_Run extends GPT_Engine
                         $cols = count($p[0]);
                         for ($c = 0; $c < $cols; $c++) {
                             $grad = $row_grad[$c] * $scale_clip;
-                            $this->m[$idx] = $this->beta1 * $this->m[$idx] + (1 - $this->beta1) * $grad;
-                            $this->v[$idx] = $this->beta2 * $this->v[$idx] + (1 - $this->beta2) * ($grad ** 2);
+                            $this->m[$idx] = $y->beta1 * $this->m[$idx] + (1 - $y->beta1) * $grad;
+                            $this->v[$idx] = $y->beta2 * $this->v[$idx] + (1 - $y->beta2) * ($grad ** 2);
                             $m_hat = $this->m[$idx] / $bias_correction1;
                             $v_hat = $this->v[$idx] / $bias_correction2;
-                            $p[$r][$c] -= $lr_t * $m_hat / (sqrt($v_hat) + $this->eps_adam);
+                            $p[$r][$c] -= $lr_t * $m_hat / (sqrt($v_hat) + $y->eps_adam);
                             $idx++;
                         }
                     } else {
                         $grad = $grads_block[$r] * $scale_clip;
-                        $this->m[$idx] = $this->beta1 * $this->m[$idx] + (1 - $this->beta1) * $grad;
-                        $this->v[$idx] = $this->beta2 * $this->v[$idx] + (1 - $this->beta2) * ($grad ** 2);
+                        $this->m[$idx] = $y->beta1 * $this->m[$idx] + (1 - $y->beta1) * $grad;
+                        $this->v[$idx] = $y->beta2 * $this->v[$idx] + (1 - $y->beta2) * ($grad ** 2);
                         $m_hat = $this->m[$idx] / $bias_correction1;
                         $v_hat = $this->v[$idx] / $bias_correction2;
-                        $p[$r] -= $lr_t * $m_hat / (sqrt($v_hat) + $this->eps_adam);
+                        $p[$r] -= $lr_t * $m_hat / (sqrt($v_hat) + $y->eps_adam);
                         $idx++;
                     }
                 }
             }
-            yield ++$step => $batch_loss / $this->batch_size;
+            $y->loss = $batch_loss / $y->batch_size;
+            yield ++$step => $y;
+            if ($y->checkpoint)
+                $this->save_bin($y, $qtz);
+        }
+        $this->save_bin($y, $qtz);
+    }
+
+    private function save_bin($y, $qtz) {
+        $y->checkpoint = false;
+        if ($y->bin_out && $qtz) {
+            GPT_Bin::save($y->bin_out, $this->params, $qtz, [
+                'n_embd'     => $this->n_embd,
+                'n_head'     => $this->n_head,
+                'n_layer'    => $this->n_layer,
+                'block_size' => $this->block_size,
+                'dataset'    => $this->dataset,
+            ]);
+            GPT_Bin::save("$y->bin_out.adam", [$this->m, $this->v], $qtz, (array)$y);
         }
     }
 
-    private function train_one_doc(array $tokens): float {
+    private function train_one_doc(array $tokens, $batch_size): float {
         $n = min($this->block_size, count($tokens) - 1);
         $this->cache = $probs_all = [];
         $keys = $values = array_fill(0, $this->n_layer, []);
@@ -168,7 +193,7 @@ class GPT_Run extends GPT_Engine
             $loss += -log($d_logits[$target_id] + 1e-9);
             $d_logits[$target_id] -= 1.0;
             foreach ($d_logits as &$v)
-                $v /= ($n * $this->batch_size);
+                $v /= ($n * $batch_size);
 
             $x_final = $this->cache['x_final'][$pos_id];
             $this->accumulate_grad('lm_head', $d_logits, $x_final);
