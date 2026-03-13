@@ -6,9 +6,9 @@ class GPT_Bin
     const Q_INT8 = 8; // 1 байт на вес
     const Q_INT4 = 4; // 0.5 байта на вес
 
-    public static function save($name, $params, $qtz, $settings) {
-        $len = strlen($json = json_encode($settings));
-        $header = pack('a4CV', 'GPT2', 2, $len);
+    public static function save($name, $params, $ary, $qtz) {
+        $len = strlen($json = json_encode($ary));
+        $header = pack('a4CV', 'GPT1', 2, $len);
         $header .= $json . pack('CV', (int)$qtz, count($params));
         $blob = '';
         foreach ($params as $layerName => $weights) {
@@ -27,7 +27,7 @@ class GPT_Bin
 
     public static function load(string $name, &$params, &$v = null) {
         $header = unpack('a4magic/Cversion/Vlen', $bin = Plan::bin_g("$name.bin"), 0);
-        if ($header['magic'] !== 'GPT2')
+        if ($header['magic'] !== 'GPT1')
             throw new Error('Error in file format');
         $layers = unpack('Cquantization/Vcount', $bin, $offset = 9 + $header['len']);
         $offset += 5;

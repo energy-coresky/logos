@@ -2,15 +2,16 @@
 
 class GPT extends GPT_Engine
 {
-    private $binary;
+    private $main;
+    private $bin_in;
 
-    function __construct(&$main = null, $binary = '')
+    function __construct(&$main, $bin_in = '')
     {
         ini_set('memory_limit', '1G');
-        if ('' !== $binary) {
-            $main = GPT_Bin::load($this->binary = $binary, $this->params);
+        if ($this->bin_in = $bin_in) {
+            $this->main = $main = GPT_Bin::load($bin_in, $this->params);
         } else {
-            $main += cfg('gpt')->main;
+            $this->main = $main += cfg('gpt')->main;
         }
         foreach ($main as $k => $v)
             $this->$k = $v;
@@ -42,7 +43,7 @@ class GPT extends GPT_Engine
     }
 
     // Box-Muller transform
-    function gauss($mean = 0, $std = 1): void {
+    function gauss($mean = 0, $std = 1) {
         static $spare = null;
         static $has_spare = false;
         if ($has_spare) {
@@ -59,8 +60,8 @@ class GPT extends GPT_Engine
     }
 
     function init_weights(): array {
-        if ($this->params)
-            return GPT_Bin::load("$this->binary.adam", $this->m, $this->v);
+        if ($this->params) # loaded from bin-file
+            return GPT_Bin::load("$this->bin_in.adam", $this->m, $this->v);
 
         $matrix = function ($rows, $cols, $std = 0.02) {
             for ($i = 0; $i < $rows; $i++)
@@ -90,12 +91,12 @@ class GPT extends GPT_Engine
         return cfg('gpt')->train;
     }
 
-    function train(array &$docs, $train = [], $qtz = 0): Generator {
-        $y = (object)($train + $this->init_weights());
+    function train(array &$docs, $y, $qtz = 0): Generator {
+        //$y = (object)($train + $this->init_weights());
         $this->grads = $this->params;
         $n_docs = count($docs);
         $i_docs = 0;
-        $min_lr = y->learning_rate * 0.1; // $min_lr обычно ставят 10% от y->learning_rate или 1e-5
+        $min_lr = $y->learning_rate * 0.1; // $min_lr обычно ставят 10% от $y->learning_rate или 1e-5
         for ($step =& $y->epoch_from; $step < $y->n_epoch; ) {
             array_walk_recursive($this->grads, fn(&$v) => $v = 0.0);
             $batch_loss = 0.0;
@@ -111,15 +112,14 @@ class GPT extends GPT_Engine
             });
             $grad_norm = sqrt($grad_norm);
             $scale_clip = $grad_norm > $y->grad_clip ? $y->grad_clip / $grad_norm : 1.0;
-            // Linear decay
-          # $lr_t = y->learning_rate * (1 - $step / $y->n_epoch);
+            // Linear decay          # $lr_t = $y->learning_rate * (1 - $step / $y->n_epoch);
             # Cosine decay
             if ($step < $y->warmup_epoch) {
-                $lr_t = y->learning_rate * ($step / $y->warmup_epoch);
+                $lr_t = $y->learning_rate * ($step / $y->warmup_epoch);
             } else {
                 $decay_ratio = ($step - $y->warmup_epoch) / ($y->n_epoch - $y->warmup_epoch);
                 $coeff = 0.5 * (1 + cos(pi() * $decay_ratio));
-                $lr_t = $min_lr + (y->learning_rate - $min_lr) * $coeff;
+                $lr_t = $min_lr + ($y->learning_rate - $min_lr) * $coeff;
             }
             // --- Adam Optimizer Update ---
             $bias_correction1 = 1 - pow($y->beta1, $step + 1);
@@ -163,15 +163,10 @@ class GPT extends GPT_Engine
 
     private function save_bin($y, $qtz) {
         $y->checkpoint = false;
-        if ($y->bin_out && $qtz) {
-            GPT_Bin::save($y->bin_out, $this->params, $qtz, [
-                'n_embd'     => $this->n_embd,
-                'n_head'     => $this->n_head,
-                'n_layer'    => $this->n_layer,
-                'block_size' => $this->block_size,
-                'dataset'    => $this->dataset,
-            ]);
-            GPT_Bin::save("$y->bin_out.adam", [$this->m, $this->v], $qtz, (array)$y);
+        if ($qtz) {
+            $y->bin_out or $y->bin_out = $y->bin_in ?: 'test';
+            GPT_Bin::save($y->bin_out, $this->params, $this->main, $qtz);
+            GPT_Bin::save("$y->bin_out.adam", [$this->m, $this->v], (array)$y, $qtz);
         }
     }
 
@@ -214,21 +209,22 @@ class GPT extends GPT_Engine
         return $loss / $n;
     }
 
-    function inference(float $temperature = 0.6, int $count = 10, string $prompt = ''): Generator {
+    function inference($infer = []): Generator {
+        $y = (object)($infer + cfg('gpt')->infer);
         $tokens = [$this->BOS];
-        foreach (str_split($prompt) as $char) {
+        foreach (str_split($y->prompt) as $char) {
             if (isset($this->stoi[$char]))
                 $tokens[] = $this->stoi[$char];
         }
 
-        for ($i = 0; $i < $count; ) {
+        for ($i = 0; $i < $y->n_infer; ) {
             $keys = $values = array_fill(0, $this->n_layer, []);
             $pos_id = 0;
             foreach ($tokens as $token_id)
                 $logits = $this->gpt($token_id, $pos_id++, $keys, $values);
 
             for ($out = ''; $pos_id < $this->block_size; ) {
-                $weights = $this->softmax(array_map(fn($l) => $l / $temperature, $logits));
+                $weights = $this->softmax(array_map(fn($l) => $l / $y->temperature, $logits));
                 $token_id = $this->random_choices(range(0, $this->vocab_size - 1), $weights);
                 if ($token_id == $this->BOS)
                     break;

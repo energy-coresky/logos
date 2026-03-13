@@ -2,17 +2,18 @@
 
 class GPT_Engine
 {
-    // Architecture Params
+    // Architecture Params (main)
     public int $n_embd = 32;
     public int $n_head = 4;
     public int $n_layer = 2;
     public int $block_size = 8;
-    public int $head_dim;
     public string $dataset;
+    public int $head_dim;
+    protected $scale_head;
 
     // Model State
     public array $params = [];
-    public array $grads = []; // Градиенты (симметричны params)
+    public array $grads = [];
     public int $n_params = 0;
     public int $vocab_size = 0;
 
@@ -26,9 +27,7 @@ class GPT_Engine
     protected int $BOS = 0;
 
     // Runtime Cache for Backward pass
-    // Храним данные Forward прохода, индексированные по позиции и слою
     protected array $cache = [];
-    protected $scale_head;
 
     // Define the model architecture
     public function gpt($token_id, $pos_id, &$keys, &$values, $is_inference = true) {

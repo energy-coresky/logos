@@ -40,8 +40,9 @@ gpt:
     block_size: 8 # (8) maximum sequence length, note: the longest name is 15 characters
     dataset:
   infer:
-    n_inference: 10
+    n_infer: 10
     temperature: 0.6
+    prompt: ''
   train:
     epoch_from: 0
     warmup_epoch: 200
@@ -52,24 +53,27 @@ gpt:
     beta1: 0.9     # 0.85 0.9
     beta2: 0.95    # 0.99 0.95
     eps_adam: 1e-8
-
+    bin_out: ''
+    checkpoint:
   short:
     e: n_embd
     l: n_layer
     h: n_head
-    x: n_train
-    y: n_inference
+    x: n_epoch
+    y: n_infer
     b: block_size
+    a: batch_size
     c: grad_clip
     r: learning_rate
+    w: warmup_epoch
     t: temperature
     txt: dataset
-  str: [Default configuration:, Running with:]
+    out: bin_out
   v:
     train: false
     txt: ''
     bin: ''
-    qtz: 32
+    qtz: 0
     rnd: 42
   usage: $TAIL1
 
@@ -97,7 +101,7 @@ chart:
 
 USAGE:
 Run the Logos ware (train &| inference) as:
->sky logos z param1=value1 param2=value2 ...
+>sky logos run param1=value1 param2=value2 ...
 
 PARAMATERS:
   txt: take dataset file from `txt` dir
@@ -126,7 +130,7 @@ Default configuration:
 ~
 USAGE:
   Run the Logos ware (dataset generation) as:
-  >sky logos g param1=value1 param2=value2 ...
+  >sky logos gen param1=value1 param2=value2 ...
 SHORT PARAMATERS:
   %list_1%
 TYPES ARE: (one of is must)
