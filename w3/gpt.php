@@ -91,8 +91,7 @@ class GPT extends GPT_Engine
         return cfg('gpt')->train;
     }
 
-    function train(array &$docs, $y, $qtz = 0): Generator {
-        //$y = (object)($train + $this->init_weights());
+    function train(array &$docs, stdClass $y, $qtz = 0): Generator {
         $this->grads = $this->params;
         $n_docs = count($docs);
         $i_docs = 0;
