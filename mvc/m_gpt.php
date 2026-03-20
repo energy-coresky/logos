@@ -3,7 +3,7 @@
 class m_gpt extends Model_m
 {
     function run() {
-        $mem = Shmem::open('segment');
+        $mem = Ball::open('segment');
         $mem->write(['losses' => [], 'stop' => 0]);
         $cfg = $_POST + cfg('gpt')->default;
         $gpt = new GPT_Run($cfg);
@@ -34,7 +34,7 @@ class m_gpt extends Model_m
     }
 
     function progress() {
-        $mem = Shmem::open('segment', false);
+        $mem = Ball::open('segment', false);
         $stop = $_POST['run'] != '1';
         return $mem->replace(false, ['losses' => [], 'stop' => (int)$stop]);
     }

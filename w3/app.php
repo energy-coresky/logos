@@ -16,7 +16,6 @@ class app extends \Console
             if ($set = isset($cfg->short[$key]))
                 $key = $cfg->short[$key];
             $v->$key = $val;
-            return !$set;
         });
         return $out;
     }
@@ -24,7 +23,7 @@ class app extends \Console
     /** Run train &| inference */
     function a_run(...$in) {
         $main = $this->data($in, cfg('gpt')->main, $v);
-        if (!$main['dataset'] && !$v->bin)
+        if (!$v->dataset && !$v->bin)
             return $this->a_usage();
         $v->rnd && mt_srand($v->rnd);
         $time = time();

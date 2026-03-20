@@ -154,18 +154,18 @@ class GPT extends GPT_Engine
             }
             $y->loss = $batch_loss / $y->batch_size;
             yield ++$step => $y;
-            if ($y->checkpoint)
-                $this->save_bin($y, $qtz);
+            if ($y->checkpoint ?? false)
+                $this->save_bin($y, $qtz, $y->checkpoint);
         }
         $this->save_bin($y, $qtz);
     }
 
-    private function save_bin($y, $qtz) {
-        $y->checkpoint = false;
+    private function save_bin($y, $qtz, $checkpoint = null) {
+        $bin = $checkpoint ?? $y->bin_out ?? ($this->bin_in ?: $this->dataset);
+        unset($y->checkpoint, $y->bin_out);
         if ($qtz) {
-            $y->bin_out or $y->bin_out = $y->bin_in ?: 'test';
-            GPT_Bin::save($y->bin_out, $this->params, $this->main, $qtz);
-            GPT_Bin::save("$y->bin_out.adam", [$this->m, $this->v], (array)$y, $qtz);
+            GPT_Bin::save($bin, $this->params, ['loss' => $y->loss] + $this->main, $qtz);
+            GPT_Bin::save("$bin.adam", [$this->m, $this->v], (array)$y, $qtz);
         }
     }
 
@@ -208,7 +208,7 @@ class GPT extends GPT_Engine
         return $loss / $n;
     }
 
-    function inference($infer = []): Generator {
+    function inference(array $infer = []): Generator {
         $y = (object)($infer + cfg('gpt')->infer);
         $tokens = [$this->BOS];
         foreach (str_split($y->prompt) as $char) {
@@ -216,7 +216,7 @@ class GPT extends GPT_Engine
                 $tokens[] = $this->stoi[$char];
         }
 
-        for ($i = 0; $i < $y->n_infer; ) {
+        for ($step = 0; $step < $y->n_infer; ) {
             $keys = $values = array_fill(0, $this->n_layer, []);
             $pos_id = 0;
             foreach ($tokens as $token_id)
@@ -230,7 +230,7 @@ class GPT extends GPT_Engine
                 $out .= $this->itos[$token_id];
                 $logits = $this->gpt($token_id, $pos_id++, $keys, $values);
             }
-            yield ++$i => $out;
+            yield ++$step => $out;
         }
     }
 
